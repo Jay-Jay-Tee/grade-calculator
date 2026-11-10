@@ -2,6 +2,7 @@ import { ApiError, GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import type { ClassStats } from "../engine/types";
 import type { Extraction, ItemFlag } from "./types";
+import { MODELS } from "./models";
 
 /**
  * Extraction with Google's Gemini API, using the user's own Google AI Studio key.
@@ -175,9 +176,17 @@ function rememberBackend(apiKey: string, backend: Backend) {
     /* ignore */
   }
 }
+// Retry Google's temporary errors (overloaded, 500s) a couple of times with a short backoff.
+const RETRY = { attempts: 3, initialDelay: 1, maxDelay: 4 };
 function client(apiKey: string, backend: Backend): GoogleGenAI {
-  return backend === "vertex" ? new GoogleGenAI({ vertexai: true, apiKey }) : new GoogleGenAI({ apiKey });
+  const httpOptions = { retryOptions: RETRY };
+  return backend === "vertex" ? new GoogleGenAI({ vertexai: true, apiKey, httpOptions }) : new GoogleGenAI({ apiKey, httpOptions });
 }
+function isServerError(e: unknown): boolean {
+  return e instanceof ApiError && e.status >= 500;
+}
+/** Lightest listed model, used once when the chosen model keeps failing on Google's side. */
+const FALLBACK_MODEL = MODELS[MODELS.length - 1].id;
 function isAuthRejection(e: unknown): boolean {
   return e instanceof ApiError && (e.status === 401 || /ACCESS_TOKEN_TYPE_UNSUPPORTED|UNAUTHENTICATED/i.test(e.message));
 }
@@ -224,9 +233,9 @@ export async function aiExtract(input: AiInput, apiKey: string, model: string, s
         : `Source "${input.label}" is attached above. Extract the grading data.`,
   });
 
-  const call = (ai: GoogleGenAI, withSchema: boolean) =>
+  const call = (ai: GoogleGenAI, withSchema: boolean, useModel = model) =>
     ai.models.generateContent({
-      model,
+      model: useModel,
       contents: [{ role: "user", parts }],
       config: {
         systemInstruction: SYSTEM,
@@ -237,18 +246,30 @@ export async function aiExtract(input: AiInput, apiKey: string, model: string, s
       },
     });
 
+  // 1. Ask for JSON in our schema (the SDK already retries temporary errors).
+  // 2. If Google rejects the schema, or keeps failing on its side, ask again in plain JSON mode.
+  // 3. If the chosen model is still failing on Google's side, try the lighter model once.
+  const warnings: string[] = [];
   let res;
   try {
     res = await withBackend(apiKey, async (ai) => {
       try {
         return await call(ai, true);
       } catch (e) {
-        // If this model or endpoint rejects the schema, retry in plain JSON mode; zod still checks the result.
-        if (e instanceof ApiError && e.status === 400 && /schema/i.test(e.message)) return await call(ai, false);
-        throw e;
+        const schemaRejected = e instanceof ApiError && e.status === 400 && /schema/i.test(e.message);
+        if (!schemaRejected && !isServerError(e)) throw e;
+        try {
+          return await call(ai, false);
+        } catch (e2) {
+          if (!isServerError(e2) || model === FALLBACK_MODEL || signal?.aborted) throw e2;
+          const r = await call(ai, false, FALLBACK_MODEL);
+          warnings.push(`${model} was busy, so this was read with ${FALLBACK_MODEL}. Check it closely.`);
+          return r;
+        }
       }
     });
   } catch (e) {
+    console.error("Gemini request failed", e);
     throw new ExtractionError(describeApiError(e));
   }
 
@@ -297,7 +318,7 @@ export async function aiExtract(input: AiInput, apiKey: string, model: string, s
       };
     }),
     bands: parsed.bands,
-    warnings: [],
+    warnings,
   };
 }
 
@@ -312,11 +333,26 @@ function describeApiError(e: unknown): string {
     if (e.status === 403) return "This key can't use the Gemini API. Make a new key in Google AI Studio.";
     if (e.status === 404) return "Model not found. Pick another in Settings.";
     if (e.status === 429) return "Free limit reached. Wait a minute, try tomorrow, or switch to Flash-Lite in Settings.";
-    if (e.status >= 500) return "Gemini is having trouble right now. Try again in a moment.";
-    return `Gemini error ${e.status}: ${m.slice(0, 200)}`;
+    if (e.status >= 500) {
+      const busy = e.status === 503 || /overload|unavailable|high demand/i.test(m);
+      return `${busy ? "Gemini is overloaded right now" : "Gemini had an error on Google's side"} (${e.status}: ${googleMessage(m)}). It was retried a few times. Wait a minute and try again, or pick another model in Settings.`;
+    }
+    return `Gemini error ${e.status}: ${googleMessage(m)}`;
   }
   if (e instanceof TypeError) return "Couldn't reach Google. Check your connection.";
   return e instanceof Error ? e.message : String(e);
+}
+
+/** Google's error message, without the JSON wrapper the SDK puts around it. */
+function googleMessage(raw: string): string {
+  try {
+    const j = JSON.parse(raw.slice(raw.indexOf("{")));
+    const msg = j?.error?.message;
+    if (typeof msg === "string" && msg) return msg.slice(0, 200);
+  } catch {
+    /* not JSON */
+  }
+  return raw.replace(/\s+/g, " ").slice(0, 200);
 }
 
 export type ModelInfo = { id: string; label: string };
