@@ -21,7 +21,8 @@ export type AppState = {
 };
 
 const STATE_KEY = "whatif-grades:v1";
-const KEY_KEY = "whatif-grades:apiKey";
+const KEY_KEY = "whatif-grades:geminiKey";
+const OLD_KEY_KEY = "whatif-grades:apiKey"; // Claude key from an earlier version; no longer used
 
 function initial(): AppState {
   return {
@@ -45,6 +46,10 @@ function load(): AppState {
     const s = { ...initial(), ...parsed };
     if (!s.presets?.length) s.presets = [structuredClone(DEFAULT_PRESET)];
     if (!s.presets.some((p) => p.id === s.defaultPresetId)) s.defaultPresetId = s.presets[0].id;
+    // Earlier versions used Claude models; switch to the Gemini default.
+    if (!s.model?.startsWith("gemini")) s.model = DEFAULT_MODEL;
+    // The built-in preset used to be called "Default", which read oddly next to "(default)".
+    s.presets = s.presets.map((p) => (p.id === "default" && p.name === "Default" ? { ...p, name: "Standard" } : p));
     // Data saved before curved grading existed has no "top %" cutoffs.
     s.presets = s.presets.map((p) => ({ ...p, bands: withTopCutoffs(p.bands) }));
     s.courses = (s.courses ?? []).map((c) => ({ ...c, bands: withTopCutoffs(c.bands ?? []) }));
@@ -91,6 +96,7 @@ export function useAppState(): AppState {
 
 export function getApiKey(): string {
   try {
+    localStorage.removeItem(OLD_KEY_KEY);
     return localStorage.getItem(KEY_KEY) ?? "";
   } catch {
     return "";

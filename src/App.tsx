@@ -115,13 +115,12 @@ export default function App() {
           >
             Import grades
           </button>
-          <button
-            className="btn small"
-            title="Load a course you saved with Save to file, from this or another device"
-            onClick={() => openFile.current?.click()}
-          >
-            Open saved course
+          <button className="btn small" onClick={() => openFile.current?.click()}>
+            Load course from file
           </button>
+          <p className="hint small sidebar-note">
+            Courses save in this browser automatically. Files are only for moving or sharing a course.
+          </p>
           <button className="btn small ghost" onClick={loadExample}>
             Load example
           </button>

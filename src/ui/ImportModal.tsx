@@ -170,19 +170,19 @@ export function ImportModal({ current, onClose, onOpenSettings }: { current: Cou
         {apiKey ? (
           <label className="check">
             <input type="checkbox" checked={useAi} onChange={(e) => setUseAi(e.target.checked)} />
-            Read with Claude ({modelLabel})
+            Read with Gemini ({modelLabel})
           </label>
         ) : (
           <p className="hint">
-            No API key, so only the plain-text parser runs (pasted text and text PDFs).{" "}
+            No key yet, so only pasted text and text PDFs can be read.{" "}
             <button className="link" onClick={onOpenSettings}>
-              Add a key
+              Add a free Gemini key
             </button>{" "}
-            to read screenshots.
+            to read screenshots too.
           </p>
         )}
       </div>
-      {imagesWithoutKey && <div className="banner warn">Images need Claude to read them. They'll be skipped.</div>}
+      {imagesWithoutKey && <div className="banner warn">Screenshots need a Gemini key to read them. They'll be skipped.</div>}
       {error && <div className="banner error">{error}</div>}
     </Modal>
   );
@@ -285,7 +285,7 @@ function ReviewStep({
         <div className="sources">
           {draft.sources.map((s, i) => (
             <div key={i} className="source">
-              <span className="file-kind">{s.method === "ai" ? "Claude" : s.method === "pdf-text" ? "PDF text" : "Text parser"}</span>
+              <span className="file-kind">{s.method === "ai" ? "Gemini" : s.method === "pdf-text" ? "PDF text" : "Text parser"}</span>
               <span className="ellipsis">{s.label}</span>
               {s.warnings.map((w, j) => (
                 <span key={j} className="warn-text">

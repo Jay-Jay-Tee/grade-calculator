@@ -60,8 +60,8 @@ export function CourseView({ course, whatIf, onImport, onBands, onExport, onTemp
         <button className="btn small" onClick={onBands}>
           Grade bands
         </button>
-        <button className="btn small" title="Download this course as a file, to back it up or open it on another device" onClick={onExport}>
-          Save to file
+        <button className="btn small" title="Download this course as a file, to share it or open it on another device" onClick={onExport}>
+          Download course
         </button>
         <button className="btn small" onClick={onTemplate}>
           Duplicate as template

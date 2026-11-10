@@ -1,6 +1,8 @@
+/** Gemini models offered in Settings. Free-tier limits are per Google AI Studio project. */
 export const MODELS = [
-  { id: "claude-opus-5-5", label: "Claude Opus 5.5 (best)" },
-  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5 (cheaper)" },
-  { id: "claude-haiku-5-5", label: "Claude Haiku 5.5 (cheapest)" },
+  { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash (most accurate)" },
+  { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite (more free requests)" },
 ] as const;
-export const DEFAULT_MODEL = "claude-opus-5-5";
+export const DEFAULT_MODEL = "gemini-3.8-flash";
+
+export const AI_STUDIO_KEY_URL = "https://aistudio.google.com/apikey";

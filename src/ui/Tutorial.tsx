@@ -193,8 +193,24 @@ const STEPS: Step[] = [
           <dd>Pick a section for it, or it's skipped.</dd>
         </dl>
         <div className="tut-tip">
-          Screenshots and scanned PDFs need a Claude API key (<b>Settings</b>). The key stays in this browser. Pasted text works
-          without one.
+          <b>Screenshots and scanned PDFs need a free Gemini key.</b> Pasted text works without one. To get a key:
+          <ol>
+            <li>
+              Open{" "}
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
+                Google AI Studio
+              </a>{" "}
+              and sign in with Google.
+            </li>
+            <li>
+              Tap <b>Create API key</b> and copy it.
+            </li>
+            <li>
+              Paste it in <b>Settings</b> and tap <b>Save key</b>. The app checks it straight away.
+            </li>
+          </ol>
+          You can pick the model in Settings too. Flash is the default; Flash-Lite gets more free requests per day. The key stays in
+          this browser.
         </div>
       </>
     ),
@@ -258,8 +274,9 @@ const STEPS: Step[] = [
         <ul>
           <li>Changes save as you type, in this browser. Values that can't be right, like a negative score, turn red with a message.</li>
           <li>
-            <b>Save to file</b> (under the course name) downloads a course as a file. <b>Open saved course</b> (in the course
-            list) loads it back, on this or another device. Handy for backups or sharing a setup with a friend.
+            Courses save in this browser automatically. To move one to another device or share it with a friend, tap{" "}
+            <b>Download course</b> (under the course name), then <b>Load course from file</b> (in the course list) on the
+            other side.
           </li>
           <li>
             <b>Duplicate as template</b> copies a course without marks. Handy when you retake it or a

@@ -17,7 +17,7 @@ export const DEFAULT_BANDS: GradeBand[] = [
 
 export const DEFAULT_PRESET: BandPreset = {
   id: "default",
-  name: "Default",
+  name: "Standard",
   bands: DEFAULT_BANDS,
 };
 
