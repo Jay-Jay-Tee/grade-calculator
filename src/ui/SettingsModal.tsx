@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { cloneBands, validateBands } from "../engine/bands";
 import { uid } from "../engine/id";
 import type { Course } from "../engine/types";
-import { AI_STUDIO_KEY_URL, DEFAULT_MODEL, MODELS } from "../import/models";
-import type { ModelInfo } from "../import/aiExtract";
-import { getApiKey, mutate, setApiKey, updateCourse, useAppState, type Theme } from "../state/store";
+import { MODELS } from "../import/models";
+import { loadAiConfig, saveAiConfig, type AiConfig, type ProviderSettings } from "../import/ai/config";
+import { CUSTOM_EXAMPLES, detectProvider, PROVIDERS, providerById, type ProviderId } from "../import/ai/providers";
+import type { ModelInfo } from "../import/ai/prompt";
+import { mutate, updateCourse, useAppState, type Theme } from "../state/store";
 import { withTopCutoffs } from "../engine/relative";
 import { BandEditor } from "./BandEditor";
 import { NumberField } from "./NumberField";
@@ -24,7 +26,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="Settings" onClose={onClose}>
-      <GeminiKeySection />
+      <AiSection />
 
       <section className="settings-block">
         <h3>Appearance</h3>
@@ -203,24 +205,48 @@ export function CourseBandsModal({ course, onClose }: { course: Course; onClose:
   );
 }
 
-/** Gemini key: where to get one, a key check, and the model picker (defaults to Flash). */
-function GeminiKeySection() {
-  const s = useAppState();
-  const [key, setKey] = useState(getApiKey());
+/**
+ * AI provider: pick a provider (or let the key's format pick it), paste a key, check it, pick a
+ * model. Each provider keeps its own key and model.
+ */
+function AiSection() {
+  const [cfg, setCfgState] = useState<AiConfig>(() => loadAiConfig());
+  const provider = providerById(cfg.active);
+  const settings: ProviderSettings = cfg.providers[cfg.active] ?? { key: "", model: provider.defaultModel ?? "" };
+  const [key, setKey] = useState(settings.key);
   const [showKey, setShowKey] = useState(false);
-  const [savedKey, setSavedKey] = useState(getApiKey());
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [status, setStatus] = useState<{ kind: "idle" | "checking" | "ok" | "error"; text: string }>({ kind: "idle", text: "" });
   const [custom, setCustom] = useState(false);
 
-  const check = async (k: string) => {
+  const setCfg = (next: AiConfig) => {
+    saveAiConfig(next);
+    setCfgState(next);
+  };
+  const update = (id: ProviderId, patch: Partial<ProviderSettings>, base = cfg) => {
+    const prev = base.providers[id] ?? { key: "", model: providerById(id).defaultModel ?? "" };
+    const next: AiConfig = { ...base, active: id, providers: { ...base.providers, [id]: { ...prev, ...patch } } };
+    setCfg(next);
+    return next;
+  };
+
+  const check = async (id: ProviderId, k: string, base: AiConfig) => {
     if (!k) return;
+    const p = providerById(id);
+    const baseURL = p.baseURL ?? base.providers[id]?.baseURL;
     setStatus({ kind: "checking", text: "Checking key..." });
     try {
       const { listModels } = await import("../import/aiExtract");
-      const list = await listModels(k);
+      const { models: list, suggested, keyChecked } = await listModels({ provider: id, key: k, baseURL });
       setModels(list);
-      setStatus({ kind: "ok", text: `Key works. ${list.length} models available.` });
+      const current = base.providers[id]?.model;
+      if (suggested && (!current || (list.length > 0 && !list.some((m) => m.id === current)))) update(id, { model: suggested }, base);
+      setStatus({
+        kind: "ok",
+        text: keyChecked
+          ? `Key works. ${list.length} ${list.length === 1 ? "model" : "models"} available.`
+          : `Model list loaded (${list.length}). Some services only check the key when you import.`,
+      });
     } catch (e) {
       setModels(null);
       setStatus({ kind: "error", text: e instanceof Error ? e.message : String(e) });
@@ -228,49 +254,116 @@ function GeminiKeySection() {
   };
 
   useEffect(() => {
-    if (savedKey) void check(savedKey);
+    if (settings.key) void check(cfg.active, settings.key, cfg);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Flash first, then the rest as Google lists them. Fall back to the built-in list until loaded.
+  const switchProvider = (id: ProviderId) => {
+    const s = cfg.providers[id];
+    setKey(s?.key ?? "");
+    setModels(null);
+    setCustom(false);
+    setStatus({ kind: "idle", text: "" });
+    const next = { ...cfg, active: id };
+    setCfg(next);
+    if (s?.key) void check(id, s.key, next);
+  };
+
+  const save = () => {
+    const k = key.trim();
+    const det = detectProvider(k);
+    // A key whose format clearly belongs to another provider switches to it (never overrides "Other").
+    const target = det && det !== cfg.active && cfg.active !== "custom" ? det : cfg.active;
+    const next = update(target, { key: k });
+    if (target !== cfg.active) setModels(null);
+    void check(target, k, next).then(() => {
+      if (target !== cfg.active) setStatus((st) => ({ ...st, text: `This looks like a key for ${providerById(target).short}, so it's saved there. ${st.text}` }));
+    });
+  };
+
   const options: ModelInfo[] = (() => {
-    const base = models && models.length ? models : MODELS.map((m) => ({ id: m.id, label: m.label }));
-    const flash = base.find((m) => m.id === DEFAULT_MODEL);
-    const rest = base.filter((m) => m.id !== DEFAULT_MODEL);
-    const list = [flash ?? { id: DEFAULT_MODEL, label: "Gemini 3.8 Flash" }, ...rest];
-    return list.map((m) => (m.id === DEFAULT_MODEL ? { ...m, label: `${m.label} - recommended` } : m));
+    const base = models && models.length ? models : provider.id === "gemini" ? MODELS.map((m) => ({ id: m.id, label: m.label })) : [];
+    const rec = provider.defaultModel;
+    return base.map((m) => (m.id === rec ? { ...m, label: `${m.label} - recommended` } : m));
   })();
-  const inList = options.some((m) => m.id === s.model);
+  const inList = options.some((m) => m.id === settings.model);
+  const host = (() => {
+    try {
+      return new URL(provider.baseURL ?? settings.baseURL ?? "").host;
+    } catch {
+      return provider.kind === "gemini" ? "Google" : provider.kind === "anthropic" ? "Anthropic" : "the provider";
+    }
+  })();
 
   return (
     <section className="settings-block">
-      <h3>Gemini API key (free)</h3>
+      <h3>AI for screenshots and PDFs</h3>
       <p className="hint">
-        Lets the app read screenshots, PDFs and messy text with Google's Gemini. Without a key, pasted text and text PDFs still work.
+        Use your own key from any AI provider. Gemini has a free tier. Without a key, pasted text and text PDFs still work.
       </p>
-      <ol className="key-steps">
-        <li>
-          Open{" "}
-          <a href={AI_STUDIO_KEY_URL} target="_blank" rel="noreferrer">
-            Google AI Studio
-          </a>{" "}
-          and sign in with a Google account.
-        </li>
-        <li>
-          Tap <b>Create API key</b>. If it asks for a project, let it make one.
-        </li>
-        <li>Copy the key and paste it below. It starts with "AIza" or "AQ.", both work.</li>
-      </ol>
-      <a className="btn small get-key" href={AI_STUDIO_KEY_URL} target="_blank" rel="noreferrer">
-        Get a free key from Google AI Studio
-      </a>
+      <label className="field">
+        Provider
+        <select value={cfg.active} onChange={(e) => switchProvider(e.target.value as ProviderId)}>
+          {PROVIDERS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+              {cfg.providers[p.id]?.key ? " (key saved)" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      {provider.note && <p className="hint small">{provider.note}</p>}
+
+      {provider.id === "gemini" && (
+        <ol className="key-steps">
+          <li>
+            Open{" "}
+            <a href={provider.keyUrl} target="_blank" rel="noreferrer">
+              Google AI Studio
+            </a>{" "}
+            and sign in with a Google account.
+          </li>
+          <li>
+            Tap <b>Create API key</b>. If it asks for a project, let it make one.
+          </li>
+          <li>Copy the key and paste it below. It starts with "AIza" or "AQ.", both work.</li>
+        </ol>
+      )}
+      {provider.keyUrl && (
+        <a className="btn small get-key" href={provider.keyUrl} target="_blank" rel="noreferrer">
+          Get a {provider.id === "gemini" ? "free " : ""}key from {provider.short}
+        </a>
+      )}
+
+      {provider.id === "custom" && (
+        <>
+          <label className="field">
+            API address
+            <input
+              value={settings.baseURL ?? ""}
+              placeholder="https://api.example.com/v1"
+              spellCheck={false}
+              aria-label="API address"
+              onChange={(e) => update("custom", { baseURL: e.target.value.trim() })}
+            />
+          </label>
+          <div className="chips-row">
+            {CUSTOM_EXAMPLES.map((x) => (
+              <button key={x.baseURL} className="chip-btn" onClick={() => update("custom", { baseURL: x.baseURL })}>
+                {x.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
       <div className="row gap">
         <input
           className="grow"
           type={showKey ? "text" : "password"}
-          placeholder="Paste your key"
+          placeholder={provider.keyHint}
           value={key}
-          aria-label="Gemini API key"
+          aria-label="API key"
           autoComplete="off"
           spellCheck={false}
           onChange={(e) => setKey(e.target.value)}
@@ -279,47 +372,47 @@ function GeminiKeySection() {
           {showKey ? "Hide" : "Show"}
         </button>
       </div>
+      {(() => {
+        const det = detectProvider(key);
+        return det && det !== cfg.active && cfg.active !== "custom" && key.trim() !== settings.key ? (
+          <div className="field-warn">This looks like a key for {providerById(det).short}. Saving will switch to it.</div>
+        ) : null;
+      })()}
+      {/\s/.test(key.trim()) && <div className="field-warn">The key has a space in it. Check you copied just the key.</div>}
       <div className="row gap wrap">
-        <button
-          className="btn small primary"
-          disabled={key.trim() === savedKey}
-          onClick={() => {
-            setApiKey(key.trim());
-            setSavedKey(key.trim());
-            void check(key.trim());
-          }}
-        >
+        <button className="btn small primary" disabled={!key.trim() || key.trim() === settings.key} onClick={save}>
           Save key
         </button>
-        {savedKey && (
-          <button
-            className="btn small ghost danger"
-            onClick={() => {
-              setApiKey("");
-              setKey("");
-              setSavedKey("");
-              setModels(null);
-              setStatus({ kind: "idle", text: "" });
-            }}
-          >
-            Remove key
-          </button>
+        {settings.key && (
+          <>
+            <button className="btn small" onClick={() => void check(cfg.active, settings.key, cfg)}>
+              Check again
+            </button>
+            <button
+              className="btn small ghost danger"
+              onClick={() => {
+                update(cfg.active, { key: "" });
+                setKey("");
+                setModels(null);
+                setStatus({ kind: "idle", text: "" });
+              }}
+            >
+              Remove key
+            </button>
+          </>
         )}
-        <span className={`hint key-status ${status.kind}`}>
-          {status.text || (savedKey ? "Key saved." : "No key saved.")}
-        </span>
+        <span className={`hint key-status ${status.kind}`}>{status.text || (settings.key ? "Key saved." : "No key saved.")}</span>
       </div>
-      {/\s/.test(key.trim()) && <div className="field-warn">The key has a space in it. Check you copied just the key.</div>}
 
       <label className="field">
         Model
         <select
-          value={custom || !inList ? "__custom" : s.model}
+          value={custom || !inList ? "__custom" : settings.model}
           onChange={(e) => {
             if (e.target.value === "__custom") setCustom(true);
             else {
               setCustom(false);
-              mutate((st) => void (st.model = e.target.value));
+              update(cfg.active, { model: e.target.value });
             }
           }}
         >
@@ -333,24 +426,17 @@ function GeminiKeySection() {
       </label>
       {(custom || !inList) && (
         <input
-          value={s.model}
+          value={settings.model}
           aria-label="Model name"
-          placeholder="e.g. gemini-3.8-flash"
+          placeholder={provider.defaultModel ?? "model name"}
           spellCheck={false}
-          onChange={(e) => mutate((st) => void (st.model = e.target.value.trim()))}
+          onChange={(e) => update(cfg.active, { model: e.target.value.trim() })}
         />
       )}
       <p className="hint small">
         {models ? "These are the models your key can use. " : "Save a key to see every model it can use. "}
-        Flash is a good balance of accuracy and free daily limit. Flash-Lite gets more free requests per day. On the free tier, Google
-        may use what you send to improve its products, so don't upload anything you wouldn't share. The key stays in this browser and is
-        only sent to Google.
+        For screenshots, pick a model that can read images. The key stays in this browser and is only sent to {host}.
       </p>
-      {s.model !== DEFAULT_MODEL && (
-        <button className="link small" onClick={() => { setCustom(false); mutate((st) => void (st.model = DEFAULT_MODEL)); }}>
-          Back to Flash (recommended)
-        </button>
-      )}
     </section>
   );
 }

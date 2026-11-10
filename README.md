@@ -20,7 +20,7 @@ what-if mode, importing and review, grade bands, and export/templates.
 ## Layout
 
 - `src/engine/` - pure calculation engine (`calc.ts`), grade bands, the CS1101S fixture. No UI imports.
-- `src/import/` - plain-text Canvas/syllabus parser, pdf.js text extraction, Gemini extraction
+- `src/import/` - plain-text Canvas/syllabus parser, pdf.js text extraction, AI extraction for any provider (`ai/`)
   (`aiExtract.ts`), and the review draft: merge, flags, apply (`draft.ts`).
 - `src/state/store.ts` - app state persisted to localStorage; course JSON export/import; templates.
 - `src/ui/` - React components.
@@ -41,12 +41,15 @@ Items combine in course points: z_total = sum(s_i z_i) / sqrt(Var), assuming tes
 is shown at rho = 0.6 with a range for 0.4 to 0.8. `src/engine/curveSim.test.ts` simulates classes and checks
 the estimate against true ranks (about 2-3.5 percentile points of error, vs 4-10.5 for averaging percentiles).
 
-## Reading screenshots and PDFs (Gemini)
+## Reading screenshots and PDFs (any AI provider)
 
-Each user adds their own free key from [Google AI Studio](https://aistudio.google.com/apikey) in Settings.
-The key is stored in that browser only and sent only to Google. Settings lists every model the key can use;
-the default is `gemini-3.8-flash`, and Flash-Lite gets a larger free daily allowance. Requests ask for JSON
-matching a schema and the reply is validated with zod. Without a key, pasted text and text-based PDFs go
-through the regex parser instead.
+Each user adds their own key in Settings. Supported: Google Gemini (free tier via
+[Google AI Studio](https://aistudio.google.com/apikey)), Anthropic Claude, OpenAI, OpenRouter, Groq, and any
+OpenAI-compatible API (DeepSeek, Mistral, Together, xAI, local Ollama / LM Studio) by base URL. The provider is
+guessed from the key format and can be changed. Each provider keeps its own key and model, stored in that browser
+only and sent only to that provider. Settings lists the models the key can use.
 
-On Google's free tier, submitted content may be used to improve Google's products.
+All providers share one prompt, one JSON shape and one zod check of the reply (`src/import/ai/prompt.ts`);
+adapters in `src/import/ai/` only differ in how they send it (Gemini JSON schema, Claude structured output,
+OpenAI-format JSON mode with the schema in the prompt). Providers that can't read PDFs get the PDF's text instead.
+Without a key, pasted text and text-based PDFs go through the regex parser.

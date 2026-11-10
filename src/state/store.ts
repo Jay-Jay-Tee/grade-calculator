@@ -21,8 +21,7 @@ export type AppState = {
 };
 
 const STATE_KEY = "whatif-grades:v1";
-const KEY_KEY = "whatif-grades:geminiKey";
-const OLD_KEY_KEY = "whatif-grades:apiKey"; // Claude key from an earlier version; no longer used
+const OLD_KEY_KEY = "whatif-grades:apiKey"; // Claude key from an early version; no longer used
 
 function initial(): AppState {
   return {
@@ -46,6 +45,11 @@ function load(): AppState {
     const s = { ...initial(), ...parsed };
     if (!s.presets?.length) s.presets = [structuredClone(DEFAULT_PRESET)];
     if (!s.presets.some((p) => p.id === s.defaultPresetId)) s.defaultPresetId = s.presets[0].id;
+    try {
+      localStorage.removeItem(OLD_KEY_KEY);
+    } catch {
+      /* ignore */
+    }
     // Earlier versions used Claude models; switch to the Gemini default.
     if (!s.model?.startsWith("gemini")) s.model = DEFAULT_MODEL;
     // The built-in preset used to be called "Default", which read oddly next to "(default)".
@@ -90,26 +94,6 @@ function subscribe(l: () => void) {
 
 export function useAppState(): AppState {
   return useSyncExternalStore(subscribe, getState);
-}
-
-// ---- API key: kept on its own key, local storage only ----
-
-export function getApiKey(): string {
-  try {
-    localStorage.removeItem(OLD_KEY_KEY);
-    return localStorage.getItem(KEY_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-export function setApiKey(key: string) {
-  try {
-    if (key) localStorage.setItem(KEY_KEY, key);
-    else localStorage.removeItem(KEY_KEY);
-  } catch {
-    /* ignore */
-  }
-  listeners.forEach((l) => l());
 }
 
 // ---- Course helpers ----

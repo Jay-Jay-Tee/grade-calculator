@@ -1,12 +1,13 @@
 import { useRef, useState, type DragEvent } from "react";
 import { uid } from "../engine/id";
 import type { AggregationRule, Course } from "../engine/types";
-import { MODELS } from "../import/models";
+import { activeAi, loadAiConfig } from "../import/ai/config";
+import { providerById } from "../import/ai/providers";
 import { applyDraft, buildDraft, checkWeights, draftProblems, itemFlags } from "../import/draft";
 import { extractAll } from "../import/extract";
 import { fileKind, type RawInput } from "../import/inputs";
 import type { Draft, DraftItem, DraftSection, ItemFlag } from "../import/types";
-import { defaultPreset, getApiKey, replaceCourse, addCourse, useAppState } from "../state/store";
+import { defaultPreset, replaceCourse, addCourse, useAppState } from "../state/store";
 import { fmtNum } from "./format";
 import { Modal } from "./Modal";
 import { NumberField } from "./NumberField";
@@ -15,7 +16,8 @@ type Step = "input" | "working" | "review";
 
 export function ImportModal({ current, onClose, onOpenSettings }: { current: Course | null; onClose: () => void; onOpenSettings: () => void }) {
   const st = useAppState();
-  const apiKey = getApiKey();
+  const ai = activeAi(loadAiConfig());
+  const apiKey = ai?.key ?? "";
   const [step, setStep] = useState<Step>("input");
   const [text, setText] = useState("");
   const [files, setFiles] = useState<RawInput[]>([]);
@@ -39,7 +41,7 @@ export function ImportModal({ current, onClose, onOpenSettings }: { current: Cou
     setError(null);
     setStep("working");
     abort.current = new AbortController();
-    const results = await extractAll(inputs, { apiKey, model: st.model, useAi, signal: abort.current.signal });
+    const results = await extractAll(inputs, { ai, useAi, signal: abort.current.signal });
     if (abort.current.signal.aborted) return;
     const existing = target === "current" ? current : null;
     const d = buildDraft(results, existing);
@@ -65,7 +67,7 @@ export function ImportModal({ current, onClose, onOpenSettings }: { current: Cou
     return <ReviewStep draft={draft} setDraft={setDraft} merging={target === "current" && !!current} onBack={() => setStep("input")} onApply={apply} onClose={onClose} />;
   }
 
-  const modelLabel = MODELS.find((m) => m.id === st.model)?.label ?? st.model;
+  const aiLabel = ai ? `${providerById(ai.provider).short}, ${ai.model || "no model picked"}` : "";
   return (
     <Modal
       title="Import"
@@ -170,19 +172,19 @@ export function ImportModal({ current, onClose, onOpenSettings }: { current: Cou
         {apiKey ? (
           <label className="check">
             <input type="checkbox" checked={useAi} onChange={(e) => setUseAi(e.target.checked)} />
-            Read with Gemini ({modelLabel})
+            Read with AI ({aiLabel})
           </label>
         ) : (
           <p className="hint">
             No key yet, so only pasted text and text PDFs can be read.{" "}
             <button className="link" onClick={onOpenSettings}>
-              Add a free Gemini key
+              Add an AI key
             </button>{" "}
-            to read screenshots too.
+            (Gemini is free) to read screenshots too.
           </p>
         )}
       </div>
-      {imagesWithoutKey && <div className="banner warn">Screenshots need a Gemini key to read them. They'll be skipped.</div>}
+      {imagesWithoutKey && <div className="banner warn">Screenshots need an AI key to read them. They'll be skipped.</div>}
       {error && <div className="banner error">{error}</div>}
     </Modal>
   );
@@ -285,7 +287,7 @@ function ReviewStep({
         <div className="sources">
           {draft.sources.map((s, i) => (
             <div key={i} className="source">
-              <span className="file-kind">{s.method === "ai" ? "Gemini" : s.method === "pdf-text" ? "PDF text" : "Text parser"}</span>
+              <span className="file-kind">{s.method === "ai" ? "AI" : s.method === "pdf-text" ? "PDF text" : "Text parser"}</span>
               <span className="ellipsis">{s.label}</span>
               {s.warnings.map((w, j) => (
                 <span key={j} className="warn-text">

@@ -200,7 +200,8 @@ const STEPS: Step[] = [
           <dd>Pick a section for it, or it's skipped.</dd>
         </dl>
         <div className="tut-tip">
-          <b>Screenshots and scanned PDFs need a free Gemini key.</b> Pasted text works without one. To get a key:
+          <b>Screenshots and scanned PDFs need an AI key.</b> Pasted text works without one. Any provider works: Gemini (free),
+          Claude, OpenAI, OpenRouter, Groq, or any OpenAI-compatible service. The free option:
           <ol>
             <li>
               Open{" "}
@@ -213,11 +214,11 @@ const STEPS: Step[] = [
               Tap <b>Create API key</b> and copy it.
             </li>
             <li>
-              Paste it in <b>Settings</b> and tap <b>Save key</b>. The app checks it straight away.
+              Paste it in <b>Settings</b> and tap <b>Save key</b>. The app works out which provider it's for and checks it.
             </li>
           </ol>
-          You can pick the model in Settings too. Flash is the default; Flash-Lite gets more free requests per day. The key stays in
-          this browser.
+          Already have a key from somewhere else? Paste that instead and pick a model. For screenshots, choose one that can read
+          images. Keys stay in this browser.
         </div>
       </>
     ),
