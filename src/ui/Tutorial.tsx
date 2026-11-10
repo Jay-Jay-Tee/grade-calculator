@@ -273,8 +273,9 @@ export function Tutorial({ onClose, onLoadExample, hasExample }: { onClose: () =
           <button
             className="btn"
             onClick={() => {
+              // Close so the course is visible (the guide covers the whole screen on phones).
               onLoadExample();
-              if (last) onClose();
+              onClose();
             }}
           >
             Load the example course
