@@ -91,3 +91,72 @@ describe("import draft", () => {
     expect(merged.id).toBe(course.id);
   });
 });
+
+import { matchSection, similarity } from "./draft";
+import type { DraftSection } from "./types";
+
+describe("section matching", () => {
+  const ds = (name: string, key = name, existingId: string | null = null): DraftSection => ({
+    key,
+    existingId,
+    name,
+    weight: 10,
+    weightKnown: true,
+    rule: { kind: "sum" },
+    evidence: "",
+    include: true,
+  });
+  it("scores names by shared words and prefixes", () => {
+    expect(similarity("Midterm", "Midterm Exam")).toBeGreaterThan(0.5);
+    expect(similarity("Quizzes", "Quiz")).toBeGreaterThan(0.5);
+    expect(similarity("Lab 3", "Labs")).toBeGreaterThan(0.5);
+    expect(similarity("Final", "Midterm")).toBe(0);
+  });
+  it("picks the best section, not the first that contains the name", () => {
+    const secs = [ds("Lab Reports"), ds("Labs")];
+    expect(matchSection("Labs", "Lab 2", secs)).toBe("Labs");
+    expect(matchSection(null, "Midterm Exam", [ds("Final Exam"), ds("Midterm")])).toBe("Midterm");
+  });
+  it("leaves near-ties unassigned instead of guessing", () => {
+    expect(matchSection("Exam", "Exam", [ds("Exam A"), ds("Exam B")])).toBeNull();
+  });
+  it("uses a remembered mapping first", () => {
+    const secs = [ds("Tutorial Work", "t", "sec-tut"), ds("Quizzes", "q", "sec-q")];
+    expect(matchSection("Weekly Problem Sets", "PS 1", secs)).toBeNull();
+    expect(matchSection("Weekly Problem Sets", "PS 1", secs, { weeklyproblemset: "sec-tut" })).toBe("t");
+  });
+});
+
+describe("learning mappings on apply", () => {
+  it("remembers where a source group's items were moved", () => {
+    const d = buildDraft([parseText("PS 1\nWeekly Problem Sets\n8 / 10\nPS 2\nWeekly Problem Sets\n9 / 10", "lms")], null);
+    const tut = { key: "t", existingId: null, name: "Tutorial Work", weight: 100, weightKnown: true, rule: { kind: "sum" as const }, evidence: "", include: true };
+    d.sections = [tut];
+    for (const it of d.items) it.sectionKey = "t";
+    const course = applyDraft(d, null, DEFAULT_PRESET);
+    const secId = course.sections[0].id;
+    expect(course.aliases).toEqual({ weeklyproblemset: secId });
+    // next import into this course goes straight to Tutorial Work
+    const again = buildDraft([parseText("PS 3\nWeekly Problem Sets\nClick to test a different score\n7 / 10", "lms")], course);
+    expect(again.items[0].sectionKey).toBe(again.sections.find((s) => s.existingId === secId)!.key);
+  });
+});
+
+describe("excused items", () => {
+  it("reads EX scores and Excused status from Canvas", () => {
+    const r = parseText("Lab 4\nLabs\nEX\n/ 10\nLab 5\nLabs\nEX / 10\nLab 6\nLabs\nExcused\n- / 10\nLab 7\nLabs\n6 / 10");
+    expect(r.items.map((i) => [i.name, !!i.excused])).toEqual([
+      ["Lab 4", true],
+      ["Lab 5", true],
+      ["Lab 6", true],
+      ["Lab 7", false],
+    ]);
+    const course = applyDraft(buildDraft([r], null), null, DEFAULT_PRESET);
+    expect(course.sections[0].items.filter((i) => i.excused)).toHaveLength(3);
+  });
+  it("flags items Canvas says are dropped", () => {
+    const r = parseText("Quiz 1\nQuizzes\n2 / 10\nThis assignment is dropped and will not be considered in the total calculation\nQuiz 2\nQuizzes\n9 / 10");
+    expect(r.items[0].flags).toContain("dropped");
+    expect(r.items[1].flags).not.toContain("dropped");
+  });
+});

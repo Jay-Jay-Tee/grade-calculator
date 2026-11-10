@@ -13,9 +13,11 @@ const NUM = String.raw`\d+(?:\.\d+)?`;
 const MONTH = String.raw`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?`;
 
 const RE = {
-  scoreSlash: new RegExp(String.raw`^(-|–|${NUM})\s*/\s*(${NUM})$`),
+  scoreSlash: new RegExp(String.raw`^(-|–|EX|${NUM})\s*/\s*(${NUM})$`, "i"),
   slashOnly: new RegExp(String.raw`^/\s*(${NUM})$`),
   numOnly: new RegExp(String.raw`^(-|${NUM})$`),
+  exOnly: /^(?:EX|excused)$/i,
+  droppedNote: /dropped and will not be considered|this assignment (?:is|was|has been) dropped/i,
   scoreOutOf: new RegExp(String.raw`^score:?\s*(-|${NUM})\s*out of\s*(${NUM})(?:\s*points?)?\.?$`, "i"),
   inline: new RegExp(
     String.raw`^(.{1,80}?)[\s:=\-]+(-|${NUM})\s*(?:/|out of)\s*(${NUM})(?:\s*(?:marks?|points?|pts))?\.?$`,
@@ -54,7 +56,7 @@ function isNoise(line: string): boolean {
 }
 
 function num(s: string): number | null {
-  if (s === "-" || s === "–") return null;
+  if (s === "-" || s === "–" || /^ex$/i.test(s)) return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
@@ -129,11 +131,14 @@ export function parseText(text: string, source = "Pasted text"): Extraction {
   let last = null as Block | null;
   let pendingStat: string | null = null;
   let inWeightTable = false;
+  let excusedNext = false; // an "Excused" / "EX" status seen for the item being read
 
   const pushScore = (score: number | null, max: number | null, inlineName?: string) => {
     if (max == null || max <= 0) return;
+    const excused = excusedNext;
+    excusedNext = false;
     if (inlineName) {
-      const item: ExtractedItem = { name: inlineName, section: null, score, max, flags: [] };
+      const item: ExtractedItem = { name: inlineName, section: null, score, max, flags: [], ...(excused ? { excused } : {}) };
       last = { pending: [], item, inline: true };
       blocks.push(last);
       pending = [];
@@ -142,7 +147,7 @@ export function parseText(text: string, source = "Pasted text"): Extraction {
     // No name lines since the last score: it's the same item's score shown twice
     // (screen-reader text plus visible text), or a score with no name. Skip it.
     if (pending.length === 0) return;
-    const item: ExtractedItem = { name: "", section: null, score, max, flags: [] };
+    const item: ExtractedItem = { name: "", section: null, score, max, flags: [], ...(excused ? { excused } : {}) };
     last = { pending, item, inline: false };
     blocks.push(last);
     pending = [];
@@ -174,12 +179,28 @@ export function parseText(text: string, source = "Pasted text"): Extraction {
       continue;
     }
 
+    // Canvas notes that the LMS has dropped an item (it applies to the item just read).
+    if (RE.droppedNote.test(line)) {
+      if (last && !last.item.flags.includes("dropped")) last.item.flags.push("dropped");
+      continue;
+    }
+    // "EX" / "Excused": the item is excused. As a score ("EX" then "/ 10") or as a status line.
+    if (RE.exOnly.test(line)) {
+      excusedNext = true;
+      if (i + 1 < lines.length && RE.slashOnly.test(lines[i + 1])) {
+        pushScore(null, num(RE.slashOnly.exec(lines[i + 1])![1]));
+        i++;
+      }
+      continue;
+    }
+
     let m: RegExpExecArray | null;
     if ((m = RE.scoreOutOf.exec(line))) {
       pushScore(num(m[1]), num(m[2]));
       continue;
     }
     if ((m = RE.scoreSlash.exec(line))) {
+      if (/^EX$/i.test(m[1])) excusedNext = true;
       pushScore(num(m[1]), num(m[2]));
       continue;
     }

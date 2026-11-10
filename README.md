@@ -27,10 +27,19 @@ what-if mode, importing and review, grade bands, and export/templates.
 
 ## How the numbers work
 
-Every unknown (ungraded item, planned best-N slot, empty section) is filled with one value x.
-x = 0 gives locked points, x = 100 gives max possible, and "needed" is the x that reaches a band's
-minimum, found by bisection. Because the total is monotonic in x, this handles best-N and drop-lowest
-correctly: a low score that would be dropped doesn't move the total.
+**Absolute.** Every unknown (ungraded item, planned best-N slot, empty section) is filled with one value x.
+x = 0 gives locked points, x = 100 gives max possible. The course total is piecewise linear in x, with kinks
+only where x overtakes a graded item in a best-N or drop-lowest section, so the x that reaches a band is
+solved exactly segment by segment (`neededForTarget`). A low score that would be dropped doesn't move the
+total. Excused items count nowhere. An optional per-course rule rounds the final % before banding, and the
+needed scores aim at the rounded cutoff.
+
+**Curved.** Each item's score becomes a z-score by interpolating between the class stats placed at their
+normal positions (quartiles at +-0.674, median at 0, low/high at +-z_n for class size n). Full marks shared by
+many students sit in the middle of that tied group. Each item's spread comes from its interquartile range.
+Items combine in course points: z_total = sum(s_i z_i) / sqrt(Var), assuming tests correlate with rho. Standing
+is shown at rho = 0.6 with a range for 0.4 to 0.8. `src/engine/curveSim.test.ts` simulates classes and checks
+the estimate against true ranks (about 2-3.5 percentile points of error, vs 4-10.5 for averaging percentiles).
 
 ## Reading screenshots and PDFs (Gemini)
 

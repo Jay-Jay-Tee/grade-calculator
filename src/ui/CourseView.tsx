@@ -104,6 +104,7 @@ export function CourseView({ course, whatIf, onImport, onBands, onExport, onTemp
               section={s}
               whatIf={whatIf}
               relative={relative}
+              classSize={course.curve?.classSize ?? null}
               issues={issues.filter((i) => i.sectionId === s.id)}
             />
           ))}
@@ -156,9 +157,15 @@ function SummaryBar({
       {relative ? (
         <div className="tile curved">
           <div className="tile-label">Class standing</div>
-          <div className="tile-value">{top == null ? "-" : `Top ${Math.max(1, Math.round(top))}%`}</div>
+          <div className="tile-value">{top == null ? "-" : `Top ${topText(top)}%`}</div>
           <div className="tile-sub">
-            {top == null ? "Add class stats to items" : `Curved ~${curvedBand?.label ?? "-"}`}
+            {top == null
+              ? "Add class stats to items"
+              : `${
+                  topText(100 - standing.high!) !== topText(100 - standing.low!)
+                    ? `likely ${topText(100 - standing.high!)}-${topText(100 - standing.low!)}%, `
+                    : ""
+                }curved ~${curvedBand?.label ?? "-"}`}
             {s.currentBand ? `, absolute ${s.currentBand.label}` : ""}
           </div>
         </div>
@@ -242,6 +249,7 @@ function NeededPanel({
           {standing.itemsWithStats === 0
             ? "No class stats yet, so this assumes you start from nothing. Absolute scores are shown underneath as a baseline."
             : `Based on ${standing.itemsWithStats} of ${standing.itemsGraded} marked items with class stats.`}
+          {standing.noSpread.length > 0 && ` Not enough stats to tell the spread for: ${standing.noSpread.join(", ")}.`}
           {whatIf && " Counting your what-if scores."}
         </p>
       ) : (
@@ -268,7 +276,8 @@ function NeededPanel({
             </li>
             {course.bands.map((band, i) => {
               const abs = s.needs.find((n) => n.band === band);
-              const rel = relative && band.top != null && !done ? relativeNeed(standing, remaining, band.top) : null;
+              const rel =
+                relative && band.top != null && !done ? relativeNeed(standing, remaining, band.top, course.curve?.classSize ?? undefined) : null;
               const status = relative ? rel?.status : abs?.result.status;
               const bad = bandIssues.some((x) => x.index === i);
               return (
@@ -293,8 +302,11 @@ function NeededPanel({
                         {rel?.status === "out_of_reach" && "Out of reach"}
                         {rel?.status === "needed" && (
                           <>
-                            Top {Math.max(1, Math.round(rel.top))}% on the rest
-                            <span className="raw block">{placementHint(rel.top)}</span>
+                            Top {topText(rel.top)}% on the rest
+                            <span className="raw block">
+                              {placementHint(rel.top)}
+                              {Math.round(rel.topLow) !== Math.round(rel.topHigh) && `, likely ${topText(rel.topLow)}-${topText(rel.topHigh)}%`}
+                            </span>
                           </>
                         )}
                         {abs && <span className="raw block baseline">absolute: {absText(abs.result)}</span>}
@@ -324,6 +336,12 @@ function NeededPanel({
           )}
         </>
       )}
+      {course.rounding && course.rounding !== "none" && (
+        <p className="hint small">
+          The final % is rounded {course.rounding === "int" ? "to a whole number" : "to 1 decimal"} before picking the grade, so the
+          scores above already allow for that.
+        </p>
+      )}
       <p className="hint small">
         Tap a cutoff to change it.{" "}
         <button className="link" onClick={onBands}>
@@ -339,10 +357,15 @@ function NeededPanel({
   );
 }
 
+/** "Top x%" as a whole number, never shown as 0. */
+function topText(top: number): string {
+  return String(Math.max(1, Math.round(top)));
+}
+
 function absText(r: CourseSummary["needs"][number]["result"]): string {
   if (r.status === "secured") return "Already secured";
   if (r.status === "out_of_reach") return "Out of reach";
-  return fmtPct(r.pct);
+  return fmtPct(r.pct, 2);
 }
 
 const RULE_LABEL: Record<AggregationRule["kind"], string> = {
@@ -357,12 +380,14 @@ function SectionCard({
   section: s,
   whatIf,
   relative,
+  classSize,
   issues,
 }: {
   courseId: string;
   section: Section;
   whatIf: boolean;
   relative: boolean;
+  classSize: number | null;
   issues: Issue[];
 }) {
   const pct = sectionPct(s, whatIf);
@@ -484,7 +509,8 @@ function SectionCard({
                   item={it}
                   whatIf={whatIf}
                   relative={relative}
-                  dropped={itemPct(it, whatIf) != null && !counted.has(it.id)}
+                  classSize={classSize}
+                  dropped={!it.excused && itemPct(it, whatIf) != null && !counted.has(it.id)}
                   issues={issues.filter((i) => i.itemId === it.id)}
                   onRemove={() => up((x) => void (x.items = x.items.filter((y) => y.id !== it.id)))}
                 />
@@ -524,6 +550,7 @@ function ItemRow({
   item: it,
   whatIf,
   relative,
+  classSize,
   dropped,
   issues,
   onRemove,
@@ -533,6 +560,7 @@ function ItemRow({
   item: Item;
   whatIf: boolean;
   relative: boolean;
+  classSize: number | null;
   dropped: boolean;
   issues: Issue[];
   onRemove: () => void;
@@ -545,11 +573,11 @@ function ItemRow({
     const i = issues.find((x) => x.field === f);
     return i ? (i.level === "error" ? "invalid" : "warn") : "";
   };
-  const perc = relative ? itemPercentile(it, whatIf) : null;
+  const perc = relative ? itemPercentile(it, whatIf, classSize) : null;
 
   return (
     <>
-      <div className={`item-row ${dropped ? "dropped" : ""} ${usingWhatIf ? "using-whatif" : ""}`}>
+      <div className={`item-row ${dropped ? "dropped" : ""} ${usingWhatIf ? "using-whatif" : ""} ${it.excused ? "excused" : ""}`}>
         <input className="item-name" value={it.name} aria-label="Item name" onChange={(e) => upd((x) => void (x.name = e.target.value))} />
         <NumberField value={it.score} placeholder="-" min={0} className={bad("score")} ariaLabel={`${it.name} score`} onChange={(v) => upd((x) => void (x.score = v))} />
         <NumberField
@@ -572,12 +600,23 @@ function ItemRow({
           />
         )}
         <span className="r item-pct">
-          {fmtPct(p, 0)}
+          {it.excused ? <span className="tag">excused</span> : fmtPct(p, 0)}
           {dropped && <span className="tag">dropped</span>}
         </span>
-        <button className="icon-btn" aria-label={`Remove ${it.name}`} onClick={onRemove}>
-          ×
-        </button>
+        <span className="item-actions">
+          <button
+            className={`icon-btn ex-btn ${it.excused ? "on" : ""}`}
+            aria-pressed={!!it.excused}
+            aria-label={`${it.excused ? "Un-excuse" : "Excuse"} ${it.name}`}
+            title={it.excused ? "Excused: counts nowhere. Tap to undo." : "Mark excused (counts nowhere)"}
+            onClick={() => upd((x) => void (x.excused = x.excused ? undefined : true))}
+          >
+            EX
+          </button>
+          <button className="icon-btn" aria-label={`Remove ${it.name}`} onClick={onRemove}>
+            ×
+          </button>
+        </span>
       </div>
       {relative && (
         <div className="item-stats">

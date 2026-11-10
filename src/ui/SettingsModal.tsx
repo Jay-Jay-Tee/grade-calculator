@@ -7,6 +7,8 @@ import type { ModelInfo } from "../import/aiExtract";
 import { getApiKey, mutate, setApiKey, updateCourse, useAppState, type Theme } from "../state/store";
 import { withTopCutoffs } from "../engine/relative";
 import { BandEditor } from "./BandEditor";
+import { NumberField } from "./NumberField";
+import type { Rounding } from "../engine/types";
 import { Modal } from "./Modal";
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -161,6 +163,37 @@ export function CourseBandsModal({ course, onClose }: { course: Course; onClose:
           </button>
         ))}
       </div>
+      <div className="row gap wrap course-band-opts">
+        <label className="field">
+          Round the final % before picking the grade
+          <select
+            value={course.rounding ?? "none"}
+            onChange={(e) => updateCourse(course.id, (c) => void (c.rounding = e.target.value as Rounding))}
+          >
+            <option value="none">No rounding (84.99% is not 85%)</option>
+            <option value="1dp">To 1 decimal (84.95% counts as 85.0%)</option>
+            <option value="int">To a whole number (84.5% counts as 85%)</option>
+          </select>
+        </label>
+        {course.grading === "relative" && (
+          <label className="field">
+            Class size (optional)
+            <NumberField
+              value={course.curve?.classSize ?? null}
+              integer
+              min={2}
+              placeholder="100"
+              ariaLabel="Class size"
+              onChange={(v) => updateCourse(course.id, (c) => void (c.curve = { ...c.curve, classSize: v }))}
+            />
+          </label>
+        )}
+      </div>
+      {course.grading === "relative" && (
+        <p className="hint small">
+          Class size sets how extreme the class's lowest and highest scores are. If you don't know it, 100 is used.
+        </p>
+      )}
       <BandEditor
         bands={course.bands}
         showTop={course.grading === "relative"}

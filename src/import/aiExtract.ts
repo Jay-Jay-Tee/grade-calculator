@@ -54,11 +54,20 @@ const JSON_SCHEMA = {
           stats: {
             type: "object",
             description: "class stats for this item in raw marks (Canvas Score Details); null when not shown",
-            properties: { low: num, lowerQuartile: num, median: num, mean: num, upperQuartile: num, high: num },
-            required: ["low", "lowerQuartile", "median", "mean", "upperQuartile", "high"],
+            properties: {
+              low: num,
+              lowerQuartile: num,
+              median: num,
+              mean: num,
+              upperQuartile: num,
+              high: num,
+              n: { ...num, description: "number of students, if shown" },
+            },
+            required: ["low", "lowerQuartile", "median", "mean", "upperQuartile", "high", "n"],
           },
+          excused: { type: "boolean", description: "true if the item is marked excused (EX)" },
         },
-        required: ["name", "section", "score", "max", "flags", "stats"],
+        required: ["name", "section", "score", "max", "flags", "stats", "excused"],
       },
     },
     bands: {
@@ -100,10 +109,11 @@ const ExtractionSchema = z.object({
         max: n,
         flags: z.array(z.string()).optional().default([]),
         stats: z
-          .object({ low: n, lowerQuartile: n, median: n, mean: n, upperQuartile: n, high: n })
+          .object({ low: n, lowerQuartile: n, median: n, mean: n, upperQuartile: n, high: n, n })
           .partial()
           .nullable()
           .optional(),
+        excused: z.boolean().optional().default(false),
       }),
     )
     .default([]),
@@ -122,7 +132,7 @@ Sections (how the course is weighted):
 
 Items (individual marks):
 - name, section (the assignment group shown with it, e.g. "Check-Ins", "RA/PA"), score, max. Ungraded or "-" scores are null.
-- Canvas grades pages: ignore the "Click to test a different score" text. Put each item's "Score Details" numbers (Low, Lower Quartile, Median, Mean, Upper Quartile, High) into its stats, in raw marks; missing ones are null. Add the flag "suspicious_zero" when the score is 0 but the class Low is above 0 (usually a what-if value or a missing submission). Use "what_if_value" if the page marks a score as a what-if, "missing_submission" if marked missing, "dropped" if marked as dropped.
+- Canvas grades pages: ignore the "Click to test a different score" text. Put each item's "Score Details" numbers (Low, Lower Quartile, Median, Mean, Upper Quartile, High) into its stats, in raw marks; missing ones are null. Add the flag "suspicious_zero" when the score is 0 but the class Low is above 0 (usually a what-if value or a missing submission). Set excused true for items marked "EX" or "Excused" (score null). Put the class size into stats.n if shown. Use "what_if_value" if the page marks a score as a what-if, "missing_submission" if marked missing, "dropped" if marked as dropped.
 
 Bands: only if the source lists grade cutoffs (e.g. "A+ 90"). min is the inclusive lower bound in percent. Otherwise an empty list.
 
@@ -272,10 +282,19 @@ export async function aiExtract(input: AiInput, apiKey: string, model: string, s
         mean: st.mean ?? null,
         upper: st.upperQuartile ?? null,
         high: st.high ?? null,
+        n: st.n ?? null,
       };
       const any = Object.values(stats).some((v) => v != null);
       if (i.score === 0 && stats.low != null && stats.low > 0 && !flags.includes("suspicious_zero")) flags.push("suspicious_zero");
-      return { name: i.name, section: i.section, score: i.score, max: i.max, flags, stats: any ? stats : undefined };
+      return {
+        name: i.name,
+        section: i.section,
+        score: i.excused ? null : i.score,
+        max: i.max,
+        flags,
+        stats: any ? stats : undefined,
+        ...(i.excused ? { excused: true } : {}),
+      };
     }),
     bands: parsed.bands,
     warnings: [],

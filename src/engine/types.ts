@@ -11,6 +11,7 @@ export type Item = {
   score: number | null; // real score, null if not graded yet
   whatIf: number | null; // hypothetical score, used when what-if mode is on
   stats?: ClassStats; // class stats for this item, used for curved grading
+  excused?: boolean; // excused items count nowhere (Canvas "EX")
 };
 
 /** Class stats an LMS shows per assessment (Canvas "Score Details"), in raw marks. */
@@ -21,6 +22,7 @@ export type ClassStats = {
   mean?: number | null;
   upper?: number | null; // upper quartile
   high?: number | null;
+  n?: number | null; // class size, if shown
 };
 
 export type Section = {
@@ -39,6 +41,9 @@ export type GradeBand = {
 
 export type Grading = "absolute" | "relative";
 
+/** How the final percentage is rounded before picking a grade (half up). */
+export type Rounding = "none" | "1dp" | "int";
+
 export type Course = {
   id: string;
   name: string;
@@ -46,6 +51,9 @@ export type Course = {
   bands: GradeBand[];
   presetId?: string | null; // preset the bands were seeded from, if any
   grading?: Grading; // default "absolute"
+  rounding?: Rounding; // default "none"
+  curve?: { classSize?: number | null }; // curved grading settings
+  aliases?: Record<string, string>; // import: normalised group name -> section id, learned from review
 };
 
 export type BandPreset = {

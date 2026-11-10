@@ -365,3 +365,20 @@ input.warn { border-color: var(--warn); background: var(--warn-soft); }
 .tut-tip ol { margin: 6px 0; padding-left: 20px; }
 .tutorial a, .settings-block a:not(.btn) { color: var(--accent); }
 .sidebar-note { margin: 0; text-align: center; }
+
+/* ---------- excused items ---------- */
+.item-row { grid-template-columns: minmax(0, 1fr) 72px 72px 64px 58px; }
+.items.with-whatif .item-row { grid-template-columns: minmax(0, 1fr) 72px 72px 72px 64px 58px; }
+.item-actions { display: inline-flex; justify-content: flex-end; }
+.ex-btn { font-size: 10.5px; font-weight: 700; width: 26px; letter-spacing: 0.02em; }
+.ex-btn.on { background: var(--warn-soft); color: var(--warn); }
+.item-row.excused .item-name, .item-row.excused .num { opacity: 0.5; }
+@media (max-width: 760px) {
+  .item-row { grid-template-columns: minmax(0, 1fr) 56px 56px 46px 52px; }
+  .items.with-whatif .item-row { grid-template-columns: minmax(0, 1fr) 50px 50px 54px 42px 52px; }
+  .ex-btn { width: 24px; }
+  .item-actions .icon-btn { width: 26px; }
+}
+.course-band-opts { align-items: flex-end; }
+.course-band-opts .field { flex: 1 1 220px; }
+.course-band-opts .num { width: 100%; text-align: left; }

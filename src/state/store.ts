@@ -198,7 +198,7 @@ export function parseCourseFile(text: string): Course {
   const stat = (s: unknown) => {
     if (!s || typeof s !== "object") return undefined;
     const o = s as Record<string, unknown>;
-    const out = { low: numOrNull(o.low), lower: numOrNull(o.lower), median: numOrNull(o.median), mean: numOrNull(o.mean), upper: numOrNull(o.upper), high: numOrNull(o.high) };
+    const out = { low: numOrNull(o.low), lower: numOrNull(o.lower), median: numOrNull(o.median), mean: numOrNull(o.mean), upper: numOrNull(o.upper), high: numOrNull(o.high), n: numOrNull(o.n) };
     return Object.values(out).some((v) => v != null) ? out : undefined;
   };
   return {
@@ -206,6 +206,8 @@ export function parseCourseFile(text: string): Course {
     name: c.name,
     presetId: null,
     grading: c.grading === "relative" ? "relative" : "absolute",
+    rounding: c.rounding === "int" || c.rounding === "1dp" ? c.rounding : "none",
+    curve: { classSize: numOrNull(c.curve?.classSize) },
     bands: withTopCutoffs(
       Array.isArray(c.bands) && c.bands.length
         ? c.bands.map((b) => ({ label: String(b.label), min: num(b.min, 0), ...(numOrNull(b.top) != null ? { top: numOrNull(b.top)! } : {}) }))
@@ -223,6 +225,7 @@ export function parseCourseFile(text: string): Course {
         score: numOrNull(i.score),
         whatIf: numOrNull(i.whatIf),
         stats: stat(i.stats),
+        ...(i.excused ? { excused: true } : {}),
       })),
     })),
   };

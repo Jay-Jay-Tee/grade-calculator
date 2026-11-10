@@ -77,6 +77,9 @@ const STEPS: Step[] = [
             <b>Best N sections</b> show items that don't count right now as <span className="tag">dropped</span>.
           </li>
           <li>
+            <b>Excused from something?</b> Tap <b>EX</b> on the item. It then counts nowhere, as if it didn't exist.
+          </li>
+          <li>
             <b>Know how many are coming?</b> Set "best 3 of <b>4</b>". Items you haven't added yet still count as planned.
           </li>
         </ul>
@@ -137,6 +140,10 @@ const STEPS: Step[] = [
           </li>
           <li>
             If only <b>one item</b> is left (say the Final), you also see the exact marks you need on it.
+          </li>
+          <li>
+            Scores are shown to two decimals, so 74.42% means you need at least that. If your course rounds the final % (84.5%
+            counts as 85%), set that in <b>Grade bands</b> and the scores allow for it.
           </li>
           <li>Best N and drop-lowest rules are taken into account, so a score that would be dropped doesn't count against you.</li>
         </ul>
@@ -250,7 +257,9 @@ const STEPS: Step[] = [
             Add the <b>class stats</b> under each item (Low, quartiles, median, High). Importing a Canvas page fills them in for you.
           </li>
           <li>
-            You get an estimated <b>class standing</b>, like "Top 18%", and the grade that usually goes with it.
+            You get an estimated <b>class standing</b>, like "Top 18%", with a likely range (say 15-22%), and the grade that
+            usually goes with it. The range is there because we can't know how closely the class's results on different tests
+            line up.
           </li>
           <li>
             Cutoffs become "top % of class": A+ for the top 5%, A for the top 25%, and so on. Rough rule: above the upper quartile on

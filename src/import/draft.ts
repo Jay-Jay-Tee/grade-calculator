@@ -22,28 +22,68 @@ export function toRule(r: ExtractedRule | null | undefined): AggregationRule {
   }
 }
 
-/** Find the draft section an item belongs to, from its group hint or its own name. */
-export function matchSection(hint: string | null, itemName: string, sections: DraftSection[]): string | null {
+/** Words of a name, lowercased, with a trailing plural "s" dropped from longer words. */
+function words(s: string): string[] {
+  return s
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .map((t) => (t.length > 3 ? t.replace(/s$/, "") : t));
+}
+
+/**
+ * How alike two names are, 0..1: shared words (Jaccard), or one name being the start of the
+ * other ("Lab" / "Lab 3", "Midterm" / "Midterm Exam"), scaled by how much of it overlaps.
+ */
+export function similarity(a: string, b: string): number {
+  const na = norm(a);
+  const nb = norm(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  const A = new Set(words(a));
+  const B = new Set(words(b));
+  const inter = [...A].filter((t) => B.has(t)).length;
+  const union = new Set([...A, ...B]).size;
+  let score = union ? inter / union : 0;
+  const [short, long] = na.length <= nb.length ? [na, nb] : [nb, na];
+  if (short.length >= 3 && long.startsWith(short)) score = Math.max(score, 0.25 + (0.75 * short.length) / long.length);
+  return score;
+}
+
+const MATCH_THRESHOLD = 0.5;
+
+/**
+ * Find the draft section an item belongs to. Order: a group name the user mapped before
+ * (aliases), then the best similarity between the group hint or item name and each section.
+ * A near-tie between two sections leaves the item Unassigned rather than guessing.
+ */
+export function matchSection(
+  hint: string | null,
+  itemName: string,
+  sections: DraftSection[],
+  aliases?: Record<string, string>,
+): string | null {
   const live = sections.filter((s) => s.include);
-  const h = hint ? norm(hint) : "";
-  const n = norm(itemName);
-  if (h) {
-    const exact = live.find((s) => norm(s.name) === h);
-    if (exact) return exact.key;
-    const partial = live.find((s) => {
-      const sn = norm(s.name);
-      return sn.length >= 3 && h.length >= 3 && (sn.includes(h) || h.includes(sn));
-    });
-    if (partial) return partial.key;
+  if (hint && aliases) {
+    const id = aliases[norm(hint)];
+    const hit = id ? live.find((s) => s.existingId === id) : undefined;
+    if (hit) return hit.key;
   }
-  // Pooled names like "RA1/PA1/RA2/PA2" list their items
-  const pooled = live.find((s) => s.name.includes("/") && s.name.split("/").some((p) => norm(p) === n));
-  if (pooled) return pooled.key;
-  const byName = live.find((s) => {
-    const sn = norm(s.name);
-    return sn === n || (sn.length >= 4 && (n.startsWith(sn) || sn.startsWith(n) && n.length >= 4));
-  });
-  return byName?.key ?? null;
+  const n = norm(itemName);
+  const scored = live
+    .map((s) => {
+      let score = 0;
+      if (hint) score = Math.max(score, similarity(hint, s.name));
+      // Pooled names like "RA1/PA1/RA2/PA2" list their items
+      if (s.name.includes("/") && s.name.split("/").some((p) => norm(p) === n)) score = Math.max(score, 0.95);
+      score = Math.max(score, 0.9 * similarity(itemName, s.name));
+      return { key: s.key, score };
+    })
+    .sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  if (!best || best.score < MATCH_THRESHOLD) return null;
+  if (scored[1] && best.score - scored[1].score < 0.01) return null;
+  return best.key;
 }
 
 export function buildDraft(extractions: Extraction[], existing: Course | null): Draft {
@@ -129,7 +169,7 @@ export function buildDraft(extractions: Extraction[], existing: Course | null): 
     for (const it of ex.items) {
       const name = it.name.trim();
       if (!name) continue;
-      const sectionKey = matchSection(it.section, name, sections);
+      const sectionKey = matchSection(it.section, name, sections, existing?.aliases);
       const key = `${norm(name)}|${sectionKey ?? ""}`;
       const flags = it.flags.filter((f): f is ItemFlag => f !== "unmatched_item");
       const prev = itemIndex.get(key);
@@ -138,6 +178,7 @@ export function buildDraft(extractions: Extraction[], existing: Course | null): 
         if (prev.max == null && it.max != null) prev.max = it.max;
         for (const f of flags) if (!prev.flags.includes(f)) prev.flags.push(f);
         if (it.stats) prev.stats = { ...prev.stats, ...it.stats };
+        if (it.excused) prev.excused = true;
         continue;
       }
       const d: DraftItem = {
@@ -149,6 +190,7 @@ export function buildDraft(extractions: Extraction[], existing: Course | null): 
         max: it.max,
         flags,
         stats: it.stats,
+        ...(it.excused ? { excused: true } : {}),
         include: true,
       };
       items.push(d);
@@ -249,11 +291,30 @@ export function applyDraft(d: Draft, existing: Course | null, defaultPreset: Ban
       match.score = di.score;
       match.max = di.max;
       if (di.stats) match.stats = { ...match.stats, ...di.stats };
+      if (di.excused != null) match.excused = di.excused || undefined;
     } else {
       const item: Item = { id: uid(), name: di.name.trim(), max: di.max, score: di.score, whatIf: null };
       if (di.stats) item.stats = { ...di.stats };
+      if (di.excused) item.excused = true;
       s.items.push(item);
     }
+  }
+
+  // Remember where items from each source group went, when every item from that group went to
+  // the same section and the names differ. The next import into this course uses it first.
+  const groupTo = new Map<string, string | null>();
+  for (const di of d.items) {
+    if (!di.include || !di.sectionHint || !di.sectionKey) continue;
+    const s = sectionFor.get(di.sectionKey);
+    if (!s) continue;
+    const h = norm(di.sectionHint);
+    if (!h || h === norm(s.name)) continue;
+    const prev = groupTo.get(h);
+    groupTo.set(h, prev === undefined || prev === s.id ? s.id : null);
+  }
+  for (const [h, id] of groupTo) {
+    if (!id) continue;
+    base.aliases = { ...base.aliases, [h]: id };
   }
   return base;
 }

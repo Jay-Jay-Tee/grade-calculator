@@ -1,4 +1,4 @@
-import type { Course, GradeBand, Item, Section } from "./types";
+import type { Course, GradeBand, Item, Rounding, Section } from "./types";
 
 /**
  * Pure calculation engine. Every function here is side-effect free.
@@ -10,9 +10,10 @@ import type { Course, GradeBand, Item, Section } from "./types";
  *   no item yet, or a section with no items at all.
  * - "filled" evaluation: every unknown slot is assumed to score `fill` percent. Filling with 0
  *   gives the minimum possible (locked points), filling with 100 gives the maximum possible.
- *   Because the course total is monotonic in `fill`, the score needed on what's left is found
- *   by bisection, which handles best-N and drop-lowest rules correctly (a low score that would
- *   be dropped simply doesn't move the total).
+ *   The course total is non-decreasing and piecewise linear in `fill` (kinks only where a filled
+ *   slot overtakes a graded item in a best-N / drop-lowest section), so the score needed on what's
+ *   left is solved exactly segment by segment. A low score that would be dropped doesn't move it.
+ * - Excused items are ignored everywhere, as if they didn't exist.
  */
 
 const EPS = 1e-9;
@@ -27,6 +28,30 @@ export function itemPct(item: Item, whatIf: boolean): number | null {
   const s = effectiveScore(item, whatIf);
   if (s == null || !(item.max > 0)) return null;
   return (s / item.max) * 100;
+}
+
+/** The section without its excused items. Every rule works on this. */
+export function active(section: Section): Section {
+  return section.items.some((i) => i.excused) ? { ...section, items: section.items.filter((i) => !i.excused) } : section;
+}
+
+/**
+ * A section whose items are all excused drops out of the course, and its weight is spread over the
+ * rest (as Canvas does). An empty section with no items is different: that's work still to come.
+ */
+export function isExcludedSection(section: Section): boolean {
+  return section.items.length > 0 && section.items.every((i) => i.excused);
+}
+
+/** Total weight, and the weight still in play once fully excused sections drop out. */
+function weights(course: Course): { total: number; included: number } {
+  let total = 0;
+  let included = 0;
+  for (const s of course.sections) {
+    total += s.weight;
+    if (!isExcludedSection(s)) included += s.weight;
+  }
+  return { total, included };
 }
 
 function mean(xs: number[]): number {
@@ -44,6 +69,7 @@ function dropLowest(xs: number[], k: number): number[] {
 
 /** Number of item slots a best-N section will eventually have. */
 export function bestNSlots(section: Section): number {
+  section = active(section);
   if (section.rule.kind !== "bestN") return section.items.length;
   return Math.max(section.rule.total ?? 0, section.rule.n, section.items.length);
 }
@@ -53,6 +79,7 @@ export function bestNSlots(section: Section): number {
  * For best-N with fewer than n graded, all graded items count.
  */
 export function sectionPct(section: Section, whatIf: boolean): number | null {
+  section = active(section);
   const rule = section.rule;
   if (rule.kind === "sum") {
     let earned = 0;
@@ -82,6 +109,7 @@ export function sectionPct(section: Section, whatIf: boolean): number | null {
 
 /** Section percentage with every unknown slot assumed to score `fill` percent. */
 export function sectionPctFilled(section: Section, whatIf: boolean, fill: number): number {
+  section = active(section);
   const rule = section.rule;
   if (rule.kind === "sum") {
     let earned = 0;
@@ -121,6 +149,8 @@ export type UnknownSlot =
   | { type: "empty"; sectionId: string }; // section with no items
 
 export function unknownSlots(section: Section, whatIf: boolean): UnknownSlot[] {
+  if (isExcludedSection(section)) return [];
+  section = active(section);
   const out: UnknownSlot[] = [];
   for (const it of section.items) {
     if (effectiveScore(it, whatIf) == null && it.max > 0) {
@@ -144,8 +174,13 @@ export function isFullyGraded(section: Section, whatIf: boolean): boolean {
 /** Course points (out of total weight) with unknowns filled at `fill` percent. */
 export function coursePointsFilled(course: Course, whatIf: boolean, fill: number): number {
   let pts = 0;
-  for (const s of course.sections) pts += (sectionPctFilled(s, whatIf, fill) * s.weight) / 100;
-  return pts;
+  for (const s of course.sections) {
+    if (isExcludedSection(s)) continue;
+    pts += (sectionPctFilled(s, whatIf, fill) * s.weight) / 100;
+  }
+  // Spread the weight of fully excused sections over the rest.
+  const w = weights(course);
+  return w.included > 0 && w.included !== w.total ? (pts * w.total) / w.included : pts;
 }
 
 export function totalWeight(course: Course): number {
@@ -160,6 +195,7 @@ export function assessedPct(course: Course, whatIf: boolean): { pct: number | nu
   let points = 0;
   let weight = 0;
   for (const s of course.sections) {
+    if (isExcludedSection(s)) continue;
     const p = sectionPct(s, whatIf);
     if (p == null) continue;
     points += (p * s.weight) / 100;
@@ -173,23 +209,59 @@ export type NeededResult =
   | { status: "out_of_reach"; best: number }
   | { status: "needed"; pct: number };
 
+/** Fill values where the course total can change slope: graded item % in best-N / drop-lowest sections. */
+export function fillBreakpoints(course: Course, whatIf: boolean): number[] {
+  const pts = new Set<number>([0, 100]);
+  for (const sec of course.sections) {
+    if (sec.rule.kind !== "bestN" && sec.rule.kind !== "dropLowest") continue;
+    for (const it of active(sec).items) {
+      const p = itemPct(it, whatIf);
+      if (p != null && p > 0 && p < 100) pts.add(p);
+    }
+  }
+  return [...pts].sort((a, b) => a - b);
+}
+
 /**
  * Average percentage needed on every unknown slot to reach `target` course points.
- * Uses bisection on the filled course total, so best-N / drop-lowest are respected.
+ * Exact: the total is linear between breakpoints, so find the segment that crosses the target
+ * and interpolate.
  */
 export function neededForTarget(course: Course, whatIf: boolean, target: number): NeededResult {
-  const lo = coursePointsFilled(course, whatIf, 0);
+  const f = (x: number) => coursePointsFilled(course, whatIf, x);
+  const lo = f(0);
   if (lo >= target - EPS) return { status: "secured" };
-  const hi = coursePointsFilled(course, whatIf, 100);
+  const hi = f(100);
   if (hi < target - EPS) return { status: "out_of_reach", best: hi };
-  let a = 0;
-  let b = 100;
-  for (let i = 0; i < 60; i++) {
-    const m = (a + b) / 2;
-    if (coursePointsFilled(course, whatIf, m) >= target - EPS) b = m;
-    else a = m;
+  const bps = fillBreakpoints(course, whatIf);
+  let px = 0;
+  let pv = lo;
+  for (let i = 1; i < bps.length; i++) {
+    const x = bps[i];
+    const v = i === bps.length - 1 ? hi : f(x);
+    if (v >= target - EPS) {
+      if (v - pv < EPS) return { status: "needed", pct: x };
+      const t = px + ((target - pv) * (x - px)) / (v - pv);
+      return { status: "needed", pct: Math.min(x, Math.max(px, t)) };
+    }
+    px = x;
+    pv = v;
   }
-  return { status: "needed", pct: b };
+  return { status: "needed", pct: 100 };
+}
+
+/** Round a course percentage the way the course does before picking a grade. Half up. */
+export function roundForBand(pct: number | null, rule: Rounding | undefined): number | null {
+  if (pct == null || !rule || rule === "none") return pct;
+  const f = rule === "int" ? 1 : 10;
+  return Math.floor(pct * f + 0.5 + 1e-9) / f;
+}
+
+/** Lowest unrounded percentage that rounds up to `min`. */
+export function effectiveCutoff(min: number, rule: Rounding | undefined): number {
+  if (rule === "int") return min - 0.5;
+  if (rule === "1dp") return min - 0.05;
+  return min;
 }
 
 export type BandNeed = { band: GradeBand; result: NeededResult; raw?: number };
@@ -247,7 +319,7 @@ export function summarize(course: Course, whatIfMode: boolean): CourseSummary {
   const single = singleRemaining(course, whatIfMode);
   const bands = [...course.bands].sort((a, b) => b.min - a.min);
   const needs: BandNeed[] = bands.map((band) => {
-    const result = neededForTarget(course, whatIfMode, band.min);
+    const result = neededForTarget(course, whatIfMode, effectiveCutoff(band.min, course.rounding));
     const need: BandNeed = { band, result };
     if (single?.max != null && result.status === "needed") need.raw = (result.pct / 100) * single.max;
     return need;
@@ -260,8 +332,8 @@ export function summarize(course: Course, whatIfMode: boolean): CourseSummary {
     locked,
     maxPossible,
     remaining: maxPossible - locked,
-    currentBand: bandFor(course.bands, real.pct),
-    projectedBand: bandFor(course.bands, proj.pct),
+    currentBand: bandFor(course.bands, roundForBand(real.pct, course.rounding)),
+    projectedBand: bandFor(course.bands, roundForBand(proj.pct, course.rounding)),
     needs,
     single,
   };
@@ -272,6 +344,7 @@ export function summarize(course: Course, whatIfMode: boolean): CourseSummary {
  * drop-lowest drops the lowest k). Items not in the set are dropped right now.
  */
 export function countedItemIds(section: Section, whatIf: boolean): Set<string> {
+  section = active(section);
   const graded = section.items
     .map((it) => ({ id: it.id, p: itemPct(it, whatIf) }))
     .filter((x): x is { id: string; p: number } => x.p != null);

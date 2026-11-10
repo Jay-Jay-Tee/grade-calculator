@@ -24,6 +24,7 @@ export type ExtractedItem = {
   max: number | null;
   flags: ItemFlag[];
   stats?: ClassStats; // class stats (Canvas "Score Details")
+  excused?: boolean; // Canvas "EX" / "Excused"
 };
 
 /** One extraction result, one per input. Matches the handover JSON schema. */
@@ -59,6 +60,7 @@ export type DraftItem = {
   max: number | null;
   flags: ItemFlag[];
   stats?: ClassStats;
+  excused?: boolean;
   include: boolean;
 };
 

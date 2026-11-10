@@ -198,3 +198,17 @@ describe("countedItemIds", () => {
     expect(ra.items.filter((i) => !counted.has(i.id)).map((i) => i.name)).toEqual(["PA2"]);
   });
 });
+
+describe("fully excused sections", () => {
+  it("drop out, and their weight is spread over the rest", async () => {
+    const c = cs1101sFixture();
+    const fin = c.sections.find((x) => x.name === "Final")!;
+    fin.items[0].excused = true;
+    const s = summarize(c, false);
+    expect(s.remaining).toBeCloseTo(0, 9); // nothing left to do
+    expect(s.single).toBeNull();
+    // 62.67 of the 70 points still in play, scaled to the whole course
+    expect(s.locked).toBeCloseTo((62.6733 * 100) / 70, 2);
+    expect(s.current!).toBeCloseTo(89.53, 2);
+  });
+});
