@@ -4,6 +4,7 @@ import { uid } from "../engine/id";
 import type { Course } from "../engine/types";
 import { MODELS } from "../import/models";
 import { getApiKey, mutate, setApiKey, updateCourse, useAppState, type Theme } from "../state/store";
+import { withTopCutoffs } from "../engine/relative";
 import { BandEditor } from "./BandEditor";
 import { Modal } from "./Modal";
 
@@ -150,6 +151,7 @@ export function CourseBandsModal({ course, onClose }: { course: Course; onClose:
   const fromPreset = s.presets.find((p) => p.id === course.presetId);
   const edited = fromPreset && JSON.stringify(fromPreset.bands) !== JSON.stringify(course.bands);
   const valid = validateBands(course.bands).length === 0;
+  // Curved cutoffs exist on every band, so presets keep both sets.
 
   return (
     <Modal title={`Grade bands for ${course.name}`} onClose={onClose}>
@@ -171,7 +173,7 @@ export function CourseBandsModal({ course, onClose }: { course: Course; onClose:
             const p = s.presets.find((x) => x.id === pick);
             if (p)
               updateCourse(course.id, (c) => {
-                c.bands = cloneBands(p.bands);
+                c.bands = withTopCutoffs(cloneBands(p.bands));
                 c.presetId = p.id;
               });
           }}
@@ -195,7 +197,29 @@ export function CourseBandsModal({ course, onClose }: { course: Course; onClose:
           Save as preset
         </button>
       </div>
-      <BandEditor bands={course.bands} onChange={(b) => updateCourse(course.id, (c) => void (c.bands = b))} />
+      <div className="segmented" role="radiogroup" aria-label="How this course is graded">
+        {(["absolute", "relative"] as const).map((g) => (
+          <button
+            key={g}
+            role="radio"
+            aria-checked={(course.grading ?? "absolute") === g}
+            className={(course.grading ?? "absolute") === g ? "on" : ""}
+            onClick={() =>
+              updateCourse(course.id, (c) => {
+                c.grading = g;
+                if (g === "relative") c.bands = withTopCutoffs(c.bands);
+              })
+            }
+          >
+            {g === "absolute" ? "Absolute" : "Curved"}
+          </button>
+        ))}
+      </div>
+      <BandEditor
+        bands={course.bands}
+        showTop={course.grading === "relative"}
+        onChange={(b) => updateCourse(course.id, (c) => void (c.bands = b))}
+      />
     </Modal>
   );
 }

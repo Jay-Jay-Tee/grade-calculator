@@ -3,6 +3,8 @@ import { cloneBands, DEFAULT_PRESET } from "../engine/bands";
 import { uid } from "../engine/id";
 import type { BandPreset, Course, Item, Section } from "../engine/types";
 import { DEFAULT_MODEL } from "../import/models";
+import { withTopCutoffs } from "../engine/relative";
+import { toRule } from "../import/draft";
 
 export type Theme = "system" | "light" | "dark";
 
@@ -43,6 +45,9 @@ function load(): AppState {
     const s = { ...initial(), ...parsed };
     if (!s.presets?.length) s.presets = [structuredClone(DEFAULT_PRESET)];
     if (!s.presets.some((p) => p.id === s.defaultPresetId)) s.defaultPresetId = s.presets[0].id;
+    // Data saved before curved grading existed has no "top %" cutoffs.
+    s.presets = s.presets.map((p) => ({ ...p, bands: withTopCutoffs(p.bands) }));
+    s.courses = (s.courses ?? []).map((c) => ({ ...c, bands: withTopCutoffs(c.bands ?? []) }));
     return s;
   } catch {
     return initial();
@@ -184,22 +189,34 @@ export function parseCourseFile(text: string): Course {
   if (!c || typeof c.name !== "string" || !Array.isArray(c.sections)) throw new Error("Not a course file.");
   const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
   const numOrNull = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const stat = (s: unknown) => {
+    if (!s || typeof s !== "object") return undefined;
+    const o = s as Record<string, unknown>;
+    const out = { low: numOrNull(o.low), lower: numOrNull(o.lower), median: numOrNull(o.median), mean: numOrNull(o.mean), upper: numOrNull(o.upper), high: numOrNull(o.high) };
+    return Object.values(out).some((v) => v != null) ? out : undefined;
+  };
   return {
     id: uid(),
     name: c.name,
     presetId: null,
-    bands: Array.isArray(c.bands) && c.bands.length ? c.bands.map((b) => ({ label: String(b.label), min: num(b.min, 0) })) : cloneBands(defaultPreset().bands),
+    grading: c.grading === "relative" ? "relative" : "absolute",
+    bands: withTopCutoffs(
+      Array.isArray(c.bands) && c.bands.length
+        ? c.bands.map((b) => ({ label: String(b.label), min: num(b.min, 0), ...(numOrNull(b.top) != null ? { top: numOrNull(b.top)! } : {}) }))
+        : cloneBands(defaultPreset().bands),
+    ),
     sections: c.sections.map((s) => ({
       id: uid(),
       name: String(s.name ?? "Section"),
       weight: num(s.weight, 0),
-      rule: s.rule && typeof s.rule.kind === "string" ? s.rule : { kind: "sum" },
+      rule: toRule(s.rule as never), // rebuilds a valid rule; anything unknown becomes "sum"
       items: (s.items ?? []).map((i) => ({
         id: uid(),
         name: String(i.name ?? "Item"),
         max: num(i.max, 100),
         score: numOrNull(i.score),
         whatIf: numOrNull(i.whatIf),
+        stats: stat(i.stats),
       })),
     })),
   };

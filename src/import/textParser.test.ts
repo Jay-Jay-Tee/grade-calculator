@@ -83,6 +83,20 @@ describe("Canvas paste parser", () => {
     expect(r.items.find((i) => i.name === "Check-In 1")!.flags).not.toContain("suspicious_zero");
   });
 
+  it("keeps class stats for curved grading", () => {
+    expect(r.items.find((i) => i.name === "RA1")!.stats).toEqual({ mean: 51.2, high: 60, low: 18 });
+  });
+
+  it("reads quartiles and median", () => {
+    const q = parseText("Quiz 3\nQuizzes\n7 / 10\nScore Details\nMean:\n6.1\nMedian:\n6\nUpper Quartile:\n8\nLower Quartile: 5\nHigh:\n10\nLow:\n1");
+    expect(q.items[0].stats).toEqual({ mean: 6.1, median: 6, upper: 8, lower: 5, high: 10, low: 1 });
+  });
+
+  it("reads name and group for a single pasted Canvas item", () => {
+    const one = parseText("Quiz 3\nQuizzes\n7 / 10\nScore Details\nMedian:\n6");
+    expect(one.items.map((i) => [i.name, i.section])).toEqual([["Quiz 3", "Quizzes"]]);
+  });
+
   it("reads the group weight table", () => {
     expect(r.sections.map((s) => [s.name, s.weight])).toEqual([
       ["Check-Ins", 3],

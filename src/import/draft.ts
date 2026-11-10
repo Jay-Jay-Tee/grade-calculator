@@ -137,6 +137,7 @@ export function buildDraft(extractions: Extraction[], existing: Course | null): 
         if (prev.score == null && it.score != null) prev.score = it.score;
         if (prev.max == null && it.max != null) prev.max = it.max;
         for (const f of flags) if (!prev.flags.includes(f)) prev.flags.push(f);
+        if (it.stats) prev.stats = { ...prev.stats, ...it.stats };
         continue;
       }
       const d: DraftItem = {
@@ -147,6 +148,7 @@ export function buildDraft(extractions: Extraction[], existing: Course | null): 
         score: it.score,
         max: it.max,
         flags,
+        stats: it.stats,
         include: true,
       };
       items.push(d);
@@ -192,7 +194,7 @@ export function itemFlags(item: DraftItem): ItemFlag[] {
   return f;
 }
 
-export type DraftProblems = { badItems: string[]; unassigned: number; badSections: string[] };
+export type DraftProblems = { badItems: string[]; negative: string[]; unassigned: number; badSections: string[] };
 
 export function draftProblems(d: Draft): DraftProblems {
   const liveKeys = new Set(d.sections.filter((s) => s.include).map((s) => s.key));
@@ -201,8 +203,11 @@ export function draftProblems(d: Draft): DraftProblems {
     badItems: live
       .filter((i) => i.sectionKey && liveKeys.has(i.sectionKey) && !(i.max != null && i.max > 0))
       .map((i) => i.name),
+    negative: live.filter((i) => i.score != null && i.score < 0).map((i) => i.name),
     unassigned: live.filter((i) => !i.sectionKey || !liveKeys.has(i.sectionKey)).length,
-    badSections: d.sections.filter((s) => s.include && (!s.name.trim() || !(s.weight >= 0))).map((s) => s.name || "(unnamed)"),
+    badSections: d.sections
+      .filter((s) => s.include && (!s.name.trim() || !(s.weight >= 0) || s.weight > 100))
+      .map((s) => s.name || "(unnamed)"),
   };
 }
 
@@ -243,8 +248,10 @@ export function applyDraft(d: Draft, existing: Course | null, defaultPreset: Ban
     if (match) {
       match.score = di.score;
       match.max = di.max;
+      if (di.stats) match.stats = { ...match.stats, ...di.stats };
     } else {
       const item: Item = { id: uid(), name: di.name.trim(), max: di.max, score: di.score, whatIf: null };
+      if (di.stats) item.stats = { ...di.stats };
       s.items.push(item);
     }
   }

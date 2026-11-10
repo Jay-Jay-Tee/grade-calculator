@@ -1,3 +1,4 @@
+import type { ClassStats } from "../engine/types";
 import type { Extraction, ExtractedItem, ExtractedRule, ExtractedSection } from "./types";
 
 /**
@@ -155,11 +156,11 @@ export function parseText(text: string, source = "Pasted text"): Extraction {
       continue;
     }
 
-    // Class stats ("Score Details" blocks): only used for flagging.
+    // Class stats ("Score Details" blocks): kept for curved grading and the suspicious-0 flag.
     if (pendingStat) {
       const n = num(line);
       if (n != null && RE.numOnly.test(line)) {
-        if (last && /^low$/i.test(pendingStat)) last.item.classLow = n;
+        if (last) setStat(last.item, pendingStat, n);
         pendingStat = null;
         continue;
       }
@@ -168,7 +169,7 @@ export function parseText(text: string, source = "Pasted text"): Extraction {
     const st = RE.stat.exec(line);
     if (st) {
       if (st[2] != null) {
-        if (last && /^low$/i.test(st[1])) last.item.classLow = Number(st[2]);
+        if (last) setStat(last.item, st[1], Number(st[2]));
       } else pendingStat = st[1];
       continue;
     }
@@ -227,7 +228,12 @@ export function parseText(text: string, source = "Pasted text"): Extraction {
     const g = norm(b.pending[b.pending.length - 1]);
     lastLines.set(g, (lastLines.get(g) ?? 0) + 1);
   }
-  const looksCanvas = [...lastLines.values()].some((n) => n >= 2) || knownGroups.size > 0;
+  // Canvas pages put the assignment group under each name. Repeated group lines, a weight table,
+  // or Canvas' own UI text all mean the paste came from Canvas.
+  const looksCanvas =
+    [...lastLines.values()].some((n) => n >= 2) ||
+    knownGroups.size > 0 ||
+    /score details|click to test a different score/i.test(text);
 
   const items: ExtractedItem[] = [];
   for (const b of blocks) {
@@ -242,7 +248,7 @@ export function parseText(text: string, source = "Pasted text"): Extraction {
       }
     }
     const it = b.item;
-    if (it.score === 0 && it.classLow != null && it.classLow > 0) it.flags.push("suspicious_zero");
+    if (it.score === 0 && it.stats?.low != null && it.stats.low > 0) it.flags.push("suspicious_zero");
     items.push(it);
   }
 
@@ -250,6 +256,21 @@ export function parseText(text: string, source = "Pasted text"): Extraction {
   const warnings: string[] = [];
   if (items.length === 0 && sections.length === 0) warnings.push("Nothing recognised in this text.");
   return { source, method: "text", courseName, sections: dedupeSections(sections), items, bands: [], warnings };
+}
+
+const STAT_KEY: Record<string, keyof ClassStats> = {
+  low: "low",
+  "lower quartile": "lower",
+  median: "median",
+  mean: "mean",
+  "upper quartile": "upper",
+  high: "high",
+};
+
+function setStat(item: ExtractedItem, name: string, value: number) {
+  const key = STAT_KEY[name.toLowerCase()];
+  if (!key) return;
+  item.stats = { ...item.stats, [key]: value };
 }
 
 function dedupeSections(sections: ExtractedSection[]): ExtractedSection[] {

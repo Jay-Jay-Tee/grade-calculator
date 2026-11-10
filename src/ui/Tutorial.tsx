@@ -204,28 +204,65 @@ const STEPS: Step[] = [
     body: (
       <>
         <p>
-          The default bands go from A+ at 90% to F below 45%. Change them in <b>Settings</b>, or save several presets, like
-          "Strict 90/80/70".
+          The default cutoffs are 90% and above for A+, 85% for A, 80% for A-, and so on down to 45% for D, with F below that.
         </p>
-        <p>
-          A single course can use different bands: <b>More</b> &gt; <b>Grade bands</b>.
-        </p>
-        <p className="hint">Many courses are curved, so treat bands as your own targets, not official cutoffs.</p>
+        <ul>
+          <li>
+            <b>Change a cutoff right in the "What do I need?" panel.</b> Tap the number next to a grade and type a new one.
+          </li>
+          <li>
+            <b>Grade bands</b> (under the course name) lets you rename, add or remove grades, or use a preset.
+          </li>
+          <li>
+            <b>Settings</b> holds presets, like "Strict 90/80/70", that new courses start from.
+          </li>
+        </ul>
+        <p className="hint">Cutoffs must go strictly down the list. You'll see a message if they don't.</p>
       </>
     ),
   },
   {
-    title: "8. Keep and reuse",
+    title: "8. Curved courses",
+    body: (
+      <>
+        <p>
+          Some courses grade on a curve: your grade depends on where you are in the class, not a fixed percentage. Switch the course
+          to <b>Curved</b> at the top of the "What do I need?" panel.
+        </p>
+        <ul>
+          <li>
+            Add the <b>class stats</b> under each item (Low, quartiles, median, High). Importing a Canvas page fills them in for you.
+          </li>
+          <li>
+            You get an estimated <b>class standing</b>, like "Top 18%", and the grade that usually goes with it.
+          </li>
+          <li>
+            Cutoffs become "top % of class": A+ for the top 5%, A for the top 25%, and so on. Rough rule: above the upper quartile on
+            everything is usually an A. Edit them to match your course.
+          </li>
+          <li>
+            "What do I need?" shows where to place on what's left, like "Top 22% on the rest (above the median)".
+          </li>
+        </ul>
+        <div className="tut-tip">
+          Curves rarely match the absolute cutoffs exactly, so the absolute result is always shown next to the curved one as a
+          baseline. Treat the curved grade as an estimate.
+        </div>
+      </>
+    ),
+  },
+  {
+    title: "9. Keep and reuse",
     body: (
       <>
         <ul>
-          <li>Changes save as you type, in this browser.</li>
+          <li>Changes save as you type, in this browser. Values that can't be right, like a negative score, turn red with a message.</li>
           <li>
-            <b>More</b> &gt; <b>Export JSON</b> saves a course to a file. Use <b>Open course file</b> to load it on another
+            <b>Export</b> (under the course name) saves a course to a file. Use <b>Open course file</b> to load it on another
             device.
           </li>
           <li>
-            <b>More</b> &gt; <b>Duplicate as template</b> copies a course without marks. Handy when you retake it or a
+            <b>Duplicate as template</b> copies a course without marks. Handy when you retake it or a
             friend takes it next semester.
           </li>
         </ul>

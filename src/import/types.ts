@@ -1,4 +1,4 @@
-import type { AggregationRule, GradeBand } from "../engine/types";
+import type { AggregationRule, ClassStats, GradeBand } from "../engine/types";
 
 /** Raw rule shape from extraction (all params optional / nullable). */
 export type ExtractedRule = {
@@ -23,7 +23,7 @@ export type ExtractedItem = {
   score: number | null;
   max: number | null;
   flags: ItemFlag[];
-  classLow?: number | null;
+  stats?: ClassStats; // class stats (Canvas "Score Details")
 };
 
 /** One extraction result, one per input. Matches the handover JSON schema. */
@@ -58,6 +58,7 @@ export type DraftItem = {
   score: number | null;
   max: number | null;
   flags: ItemFlag[];
+  stats?: ClassStats;
   include: boolean;
 };
 

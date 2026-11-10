@@ -13,7 +13,7 @@ npm run build
 
 ## Using it
 
-An 8-step guide opens on first visit and is always available from **Guide** in the header
+A 10-page guide opens on first visit and is always available from **Guide** in the header
 (`src/ui/Tutorial.tsx`). It covers sections and rules, entering marks, the summary, "What do I need?",
 what-if mode, importing and review, grade bands, and export/templates.
 

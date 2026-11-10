@@ -28,7 +28,16 @@ const ExtractionSchema = z.object({
       score: z.number().nullable().describe("marks earned, null if not graded yet"),
       max: z.number().nullable(),
       flags: z.array(z.enum(["suspicious_zero", "what_if_value", "missing_submission", "dropped"])),
-      classLow: z.number().nullable().describe("class Low from Score Details, if shown"),
+      stats: z
+        .object({
+          low: z.number().nullable(),
+          lowerQuartile: z.number().nullable(),
+          median: z.number().nullable(),
+          mean: z.number().nullable(),
+          upperQuartile: z.number().nullable(),
+          high: z.number().nullable(),
+        })
+        .describe("class stats for this item in raw marks (Canvas Score Details). All null if not shown"),
     }),
   ),
   bands: z.array(z.object({ label: z.string(), min: z.number() })),
@@ -46,7 +55,7 @@ Sections (how the course is weighted):
 
 Items (individual marks):
 - name, section (the assignment group shown with it, e.g. "Check-Ins", "RA/PA"), score, max. Ungraded or "-" scores are null.
-- Canvas grades pages: ignore the "Click to test a different score" text and the "Score Details" stat blocks, except: put the class Low into classLow, and add the flag "suspicious_zero" when the score is 0 but the class Low is above 0 (usually a what-if value or a missing submission). Use "what_if_value" if the page marks a score as a what-if, "missing_submission" if marked missing, "dropped" if marked as dropped.
+- Canvas grades pages: ignore the "Click to test a different score" text. Put each item's "Score Details" numbers (Low, Lower Quartile, Median, Mean, Upper Quartile, High) into its stats, in raw marks; leave missing ones null. Add the flag "suspicious_zero" when the score is 0 but the class Low is above 0 (usually a what-if value or a missing submission). Use "what_if_value" if the page marks a score as a what-if, "missing_submission" if marked missing, "dropped" if marked as dropped.
 
 Bands: only if the source lists grade cutoffs (e.g. "A+ 90"). min is the inclusive lower bound in percent. Otherwise an empty list.
 
@@ -109,10 +118,13 @@ export async function aiExtract(input: AiInput, apiKey: string, model: string, s
     sections: out.sections.map((s) => ({ name: s.name, weight: s.weight, rule: s.rule, evidence: s.evidence })),
     items: out.items.map((i) => {
       const flags = [...i.flags];
-      if (i.score === 0 && i.classLow != null && i.classLow > 0 && !flags.includes("suspicious_zero")) {
+      const st = i.stats;
+      const stats = { low: st.low, lower: st.lowerQuartile, median: st.median, mean: st.mean, upper: st.upperQuartile, high: st.high };
+      const any = Object.values(stats).some((v) => v != null);
+      if (i.score === 0 && st.low != null && st.low > 0 && !flags.includes("suspicious_zero")) {
         flags.push("suspicious_zero");
       }
-      return { name: i.name, section: i.section, score: i.score, max: i.max, flags, classLow: i.classLow };
+      return { name: i.name, section: i.section, score: i.score, max: i.max, flags, stats: any ? stats : undefined };
     }),
     bands: out.bands,
     warnings: [],

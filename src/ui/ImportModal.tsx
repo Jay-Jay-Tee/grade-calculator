@@ -251,7 +251,8 @@ function ReviewStep({
     setOverGroup(null);
   };
 
-  const canApply = problems.badItems.length === 0 && problems.badSections.length === 0 && draft.courseName.trim().length > 0;
+  const canApply =
+    problems.badItems.length === 0 && problems.negative.length === 0 && problems.badSections.length === 0 && draft.courseName.trim().length > 0;
 
   return (
     <Modal
@@ -265,6 +266,8 @@ function ReviewStep({
           </button>
           <span className="grow footer-note">
             {problems.badItems.length > 0 && <span className="error-text">Set a max for: {problems.badItems.join(", ")}. </span>}
+            {problems.negative.length > 0 && <span className="error-text">Negative score: {problems.negative.join(", ")}. </span>}
+            {problems.badSections.length > 0 && <span className="error-text">Check name and weight (0 to 100): {problems.badSections.join(", ")}. </span>}
             {problems.unassigned > 0 && <span>{problems.unassigned} unassigned {problems.unassigned === 1 ? "item" : "items"} will be skipped.</span>}
           </span>
           <button className="btn primary" disabled={!canApply} onClick={onApply}>
@@ -381,9 +384,9 @@ function ReviewStep({
                   <input type="checkbox" checked={it.include} aria-label={`Include ${it.name}`} onChange={(e) => editItem(it.key, (x) => void (x.include = e.target.checked))} />
                   <input className="grow item-name" value={it.name} aria-label="Item name" onChange={(e) => editItem(it.key, (x) => void (x.name = e.target.value))} />
                   <span className="score-pair">
-                    <NumberField value={it.score} placeholder="-" ariaLabel={`${it.name} score`} onChange={(v) => editItem(it.key, (x) => void (x.score = v))} />
+                    <NumberField value={it.score} placeholder="-" min={0} ariaLabel={`${it.name} score`} onChange={(v) => editItem(it.key, (x) => void (x.score = v))} />
                     <span>/</span>
-                    <NumberField value={it.max} placeholder="max" min={0} ariaLabel={`${it.name} max`} onChange={(v) => editItem(it.key, (x) => void (x.max = v))} />
+                    <NumberField value={it.max} placeholder="max" min={0} exclusiveMin ariaLabel={`${it.name} max`} onChange={(v) => editItem(it.key, (x) => void (x.max = v))} />
                   </span>
                   <select
                     value={it.sectionKey && liveKeys.has(it.sectionKey) ? it.sectionKey : ""}
@@ -400,6 +403,17 @@ function ReviewStep({
                   <button className="icon-btn" aria-label={`Remove ${it.name}`} onClick={() => edit((d) => void (d.items = d.items.filter((x) => x.key !== it.key)))}>
                     ×
                   </button>
+                  {it.stats && Object.values(it.stats).some((v) => v != null) && (
+                    <div className="flags">
+                      <span className="hint small">
+                        Class stats:{" "}
+                        {(["low", "lower", "median", "mean", "upper", "high"] as const)
+                          .filter((k) => it.stats![k] != null)
+                          .map((k) => `${{ low: "Low", lower: "Lower Q", median: "Median", mean: "Mean", upper: "Upper Q", high: "High" }[k]} ${it.stats![k]}`)
+                          .join(", ")}
+                      </span>
+                    </div>
+                  )}
                   {(itemFlags(it).length > 0 || (it.sectionHint && g.key == null)) && (
                     <div className="flags">
                       {itemFlags(it).map((f) => (
