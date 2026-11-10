@@ -258,8 +258,8 @@ const STEPS: Step[] = [
         <ul>
           <li>Changes save as you type, in this browser. Values that can't be right, like a negative score, turn red with a message.</li>
           <li>
-            <b>Export</b> (under the course name) saves a course to a file. Use <b>Open course file</b> to load it on another
-            device.
+            <b>Save to file</b> (under the course name) downloads a course as a file. <b>Open saved course</b> (in the course
+            list) loads it back, on this or another device. Handy for backups or sharing a setup with a friend.
           </li>
           <li>
             <b>Duplicate as template</b> copies a course without marks. Handy when you retake it or a
