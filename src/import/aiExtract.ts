@@ -137,10 +137,72 @@ export type AiInput =
 
 export class ExtractionError extends Error {}
 
+/**
+ * Google issues two key formats: older "AIza..." keys and newer "AQ..." keys. Most work on the
+ * Gemini API endpoint; some AQ keys are only accepted by Vertex AI's express endpoint. We try the
+ * Gemini API first and fall back to Vertex once if the key is rejected (401), then remember which
+ * one worked for this key.
+ */
+type Backend = "studio" | "vertex";
+const BACKEND_KEY = "whatif-grades:geminiBackend";
+
+function keyTag(apiKey: string): string {
+  return `${apiKey.length}:${apiKey.slice(-6)}`;
+}
+function preferredBackend(apiKey: string): Backend {
+  try {
+    const v = JSON.parse(localStorage.getItem(BACKEND_KEY) ?? "null");
+    if (v && v.tag === keyTag(apiKey) && (v.backend === "studio" || v.backend === "vertex")) return v.backend;
+  } catch {
+    /* ignore */
+  }
+  return "studio";
+}
+function rememberBackend(apiKey: string, backend: Backend) {
+  try {
+    localStorage.setItem(BACKEND_KEY, JSON.stringify({ tag: keyTag(apiKey), backend }));
+  } catch {
+    /* ignore */
+  }
+}
+function client(apiKey: string, backend: Backend): GoogleGenAI {
+  return backend === "vertex" ? new GoogleGenAI({ vertexai: true, apiKey }) : new GoogleGenAI({ apiKey });
+}
+function isAuthRejection(e: unknown): boolean {
+  return e instanceof ApiError && (e.status === 401 || /ACCESS_TOKEN_TYPE_UNSUPPORTED|UNAUTHENTICATED/i.test(e.message));
+}
+
+/** Run `fn` on the preferred endpoint, falling back to the other one if the key is rejected there. */
+async function withBackend<T>(apiKey: string, fn: (ai: GoogleGenAI, backend: Backend) => Promise<T>): Promise<T> {
+  const first = preferredBackend(apiKey);
+  try {
+    const r = await fn(client(apiKey, first), first);
+    rememberBackend(apiKey, first);
+    return r;
+  } catch (e) {
+    if (!isAuthRejection(e)) throw e;
+    const second: Backend = first === "studio" ? "vertex" : "studio";
+    try {
+      const r = await fn(client(apiKey, second), second);
+      rememberBackend(apiKey, second);
+      return r;
+    } catch (e2) {
+      // Report the more useful of the two errors: anything other than a second auth rejection.
+      throw isAuthRejection(e2) ? new KeyRejected(e) : e2;
+    }
+  }
+}
+
+/** Both endpoints rejected the key. */
+class KeyRejected extends Error {
+  constructor(public cause: unknown) {
+    super("key rejected");
+  }
+}
+
 const FLAGS: ItemFlag[] = ["suspicious_zero", "what_if_value", "missing_submission", "dropped"];
 
 export async function aiExtract(input: AiInput, apiKey: string, model: string, signal?: AbortSignal): Promise<Extraction> {
-  const ai = new GoogleGenAI({ apiKey });
 
   const parts: ({ inlineData: { mimeType: string; data: string } } | { text: string })[] = [];
   if (input.kind === "pdf") parts.push({ inlineData: { mimeType: "application/pdf", data: input.base64 } });
@@ -152,7 +214,7 @@ export async function aiExtract(input: AiInput, apiKey: string, model: string, s
         : `Source "${input.label}" is attached above. Extract the grading data.`,
   });
 
-  const call = (withSchema: boolean) =>
+  const call = (ai: GoogleGenAI, withSchema: boolean) =>
     ai.models.generateContent({
       model,
       contents: [{ role: "user", parts }],
@@ -167,16 +229,17 @@ export async function aiExtract(input: AiInput, apiKey: string, model: string, s
 
   let res;
   try {
-    res = await call(true);
-  } catch (e) {
-    // If this model rejects the schema, retry in plain JSON mode; zod still checks the result.
-    if (e instanceof ApiError && e.status === 400 && /schema/i.test(e.message)) {
+    res = await withBackend(apiKey, async (ai) => {
       try {
-        res = await call(false);
-      } catch (e2) {
-        throw new ExtractionError(describeApiError(e2));
+        return await call(ai, true);
+      } catch (e) {
+        // If this model or endpoint rejects the schema, retry in plain JSON mode; zod still checks the result.
+        if (e instanceof ApiError && e.status === 400 && /schema/i.test(e.message)) return await call(ai, false);
+        throw e;
       }
-    } else throw new ExtractionError(describeApiError(e));
+    });
+  } catch (e) {
+    throw new ExtractionError(describeApiError(e));
   }
 
   const blocked = res.promptFeedback?.blockReason;
@@ -221,6 +284,9 @@ export async function aiExtract(input: AiInput, apiKey: string, model: string, s
 
 function describeApiError(e: unknown): string {
   if (e instanceof Error && e.name === "AbortError") return "Cancelled.";
+  if (e instanceof KeyRejected) {
+    return "Google didn't accept this key. Copy it again from AI Studio. If it still fails, create a new key there (choosing a new project can help): some newer \"AQ.\" keys aren't enabled for the Gemini API yet.";
+  }
   if (e instanceof ApiError) {
     const m = e.message;
     if (/API_KEY_INVALID|API key not valid/i.test(m) || e.status === 401) return "Google rejected this API key. Check it in Settings.";
@@ -241,18 +307,22 @@ export type ModelInfo = { id: string; label: string };
  * a bad key throws an ExtractionError with a readable message.
  */
 export async function listModels(apiKey: string): Promise<ModelInfo[]> {
-  const ai = new GoogleGenAI({ apiKey });
   const out: ModelInfo[] = [];
   try {
-    const pager = await ai.models.list({ config: { pageSize: 100 } });
-    for await (const m of pager) {
-      const id = (m.name ?? "").replace(/^models\//, "");
-      if (!id.startsWith("gemini")) continue;
-      if (!(m.supportedActions ?? []).includes("generateContent")) continue;
-      // Skip models that can't read documents into text (speech, image generation, live audio, embeddings).
-      if (/tts|image-generation|-image|live|audio|embedding|native-audio/i.test(id)) continue;
-      out.push({ id, label: m.displayName ? `${m.displayName} (${id})` : id });
-    }
+    await withBackend(apiKey, async (ai) => {
+      out.length = 0;
+      const pager = await ai.models.list({ config: { pageSize: 100 } });
+      for await (const m of pager) {
+        // "models/gemini-x" on the Gemini API, "publishers/google/models/gemini-x" on Vertex
+        const id = (m.name ?? "").split("/").pop() ?? "";
+        if (!id.startsWith("gemini")) continue;
+        if (m.supportedActions && !m.supportedActions.includes("generateContent")) continue;
+        // Skip models that can't read documents into text (speech, image generation, live audio, embeddings).
+        if (/tts|image-generation|-image|live|audio|embedding|native-audio/i.test(id)) continue;
+        if (out.some((x) => x.id === id)) continue;
+        out.push({ id, label: m.displayName ? `${m.displayName} (${id})` : id });
+      }
+    });
   } catch (e) {
     throw new ExtractionError(describeApiError(e));
   }

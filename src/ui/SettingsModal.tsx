@@ -226,7 +226,7 @@ function GeminiKeySection() {
         <li>
           Tap <b>Create API key</b>. If it asks for a project, let it make one.
         </li>
-        <li>Copy the key (it starts with "AIza") and paste it below.</li>
+        <li>Copy the key and paste it below. It starts with "AIza" or "AQ.", both work.</li>
       </ol>
       <a className="btn small get-key" href={AI_STUDIO_KEY_URL} target="_blank" rel="noreferrer">
         Get a free key from Google AI Studio
@@ -235,7 +235,7 @@ function GeminiKeySection() {
         <input
           className="grow"
           type={showKey ? "text" : "password"}
-          placeholder="AIza..."
+          placeholder="Paste your key"
           value={key}
           aria-label="Gemini API key"
           autoComplete="off"
@@ -276,7 +276,7 @@ function GeminiKeySection() {
           {status.text || (savedKey ? "Key saved." : "No key saved.")}
         </span>
       </div>
-      {key.trim() && !key.trim().startsWith("AIza") && <div className="field-warn">Gemini keys usually start with "AIza". Check you copied the whole key.</div>}
+      {/\s/.test(key.trim()) && <div className="field-warn">The key has a space in it. Check you copied just the key.</div>}
 
       <label className="field">
         Model
