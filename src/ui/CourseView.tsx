@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { validateBands } from "../engine/bands";
-import { bestNSlots, countedItemIds, itemPct, sectionPct, summarize, type CourseSummary } from "../engine/calc";
+import { bandFor, bestNSlots, countedItemIds, itemPct, roundForBand, sectionPct, summarize, type CourseSummary } from "../engine/calc";
 import { uid } from "../engine/id";
 import {
   courseStanding,
@@ -223,6 +223,27 @@ function NeededPanel({
     });
 
   const done = hasSections && remaining < 1e-9;
+
+  // When nothing is left: which grade the final result lands in, by absolute cutoffs or the curve.
+  const finalPct = s.totalWeight > 0 ? s.locked / (s.totalWeight / 100) : null;
+  const finalRounded = roundForBand(finalPct, course.rounding);
+  const finalTop = standing.pct == null ? null : 100 - standing.pct;
+  const finalBand = relative ? relativeBandFor(course.bands, finalTop) : bandFor(course.bands, finalRounded);
+  const resultFor = (band: GradeBand): "mine" | "reached" | "not" | null => {
+    if (!done) return null;
+    if (relative) {
+      if (finalTop == null || band.top == null) return null;
+      return band === finalBand ? "mine" : finalTop <= band.top + 1e-9 ? "reached" : "not";
+    }
+    if (finalRounded == null) return null;
+    return band === finalBand ? "mine" : finalRounded >= band.min - 1e-9 ? "reached" : "not";
+  };
+  // Items that only count as done because of a what-if score.
+  const filledByWhatIf =
+    done && whatIf
+      ? course.sections.flatMap((sec) => sec.items.filter((it) => !it.excused && it.score == null && it.whatIf != null).map((it) => it.name))
+      : [];
+
   return (
     <aside className="needed-panel card">
       <div className="needed-head">
@@ -240,9 +261,29 @@ function NeededPanel({
       {!hasSections ? (
         <p className="hint">Add sections and weights first.</p>
       ) : done ? (
-        <p className="hint">
-          Everything is graded{whatIf ? " (counting what-ifs)" : ""}. Final result: {fmtPct(s.locked / (s.totalWeight / 100))}.
-        </p>
+        <>
+          <p className="hint">
+            {filledByWhatIf.length > 0 ? "With your what-if scores, everything has a mark." : "Everything is graded."} Final result:{" "}
+            <b>{fmtPct(finalPct, 2)}</b>
+            {course.rounding && course.rounding !== "none" && finalRounded !== finalPct
+              ? ` (rounds to ${fmtPct(finalRounded, course.rounding === "int" ? 0 : 1)})`
+              : ""}
+            {finalBand ? (
+              <>
+                , which is <b>{relative ? `about ${finalBand.label}` : finalBand.label}</b>
+                {relative && finalTop != null ? ` (top ${topText(finalTop)}% of the class)` : ""}.
+              </>
+            ) : (
+              "."
+            )}
+          </p>
+          {filledByWhatIf.length > 0 && (
+            <p className="hint small">
+              To see what you need on {filledByWhatIf.length === 1 ? <b>{filledByWhatIf[0]}</b> : "an item"} instead, clear its what-if
+              score or turn off what-if mode.
+            </p>
+          )}
+        </>
       ) : relative ? (
         <p className="hint">
           Where you need to place in the class on what's left.{" "}
@@ -272,16 +313,27 @@ function NeededPanel({
             <li className="need need-head">
               <span>Grade</span>
               <span>{relative ? "Top % of class" : "Min %"}</span>
-              <span className="r">{done ? "" : "You need"}</span>
+              <span className="r">{done ? "Result" : "You need"}</span>
             </li>
             {course.bands.map((band, i) => {
               const abs = s.needs.find((n) => n.band === band);
               const rel =
                 relative && band.top != null && !done ? relativeNeed(standing, remaining, band.top, course.curve?.classSize ?? undefined) : null;
-              const status = relative ? rel?.status : abs?.result.status;
+              const result = resultFor(band);
+              const status = done
+                ? result === "mine"
+                  ? "final-grade"
+                  : result === "reached"
+                    ? "secured"
+                    : result === "not"
+                      ? "out_of_reach"
+                      : ""
+                : relative
+                  ? rel?.status
+                  : abs?.result.status;
               const bad = bandIssues.some((x) => x.index === i);
               return (
-                <li key={i} className={`need ${done ? "" : status ?? ""}`}>
+                <li key={i} className={`need ${status ?? ""}`}>
                   <span className="need-band">{band.label}</span>
                   <span className="need-min">
                     <NumberField
@@ -296,7 +348,9 @@ function NeededPanel({
                     <span className="unit">%</span>
                   </span>
                   <span className="need-val">
-                    {done ? null : relative ? (
+                    {done ? (
+                      result === "mine" ? "Your grade" : result === "reached" ? "Reached" : result === "not" ? "Not reached" : null
+                    ) : relative ? (
                       <>
                         {rel?.status === "secured" && "Already secured"}
                         {rel?.status === "out_of_reach" && "Out of reach"}
